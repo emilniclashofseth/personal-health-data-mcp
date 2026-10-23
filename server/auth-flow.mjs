@@ -11,6 +11,7 @@ function page(title, text) {
 }
 
 export function stopListener() {
+  // Also called after a successful exchange_code so a pending localhost listener does not linger.
   if (!pending) return;
   clearTimeout(pending.timer); pending.server?.close(); pending = null;
 }
@@ -24,7 +25,7 @@ export async function startAuthorization(client, { timeoutMs = 10 * 60e3, onDone
   if (!local) {
     return {
       authorization_url: auth.url, redirect_uri: auth.redirect_uri, scopes: auth.scopes, listening: false,
-      next_step: "Open the URL, approve, then within 30 seconds pass the full URL you land on to exchange_code (or run `node server/cli.mjs authorize`, which asks for it).",
+      next_step: "Open the URL, approve, then within 30 seconds pass the full URL you land on to exchange_code on this same server (or run `node server/cli.mjs authorize`, which asks for it). The redirect URL must match a Callback URL registered in your Withings app exactly.",
     };
   }
   const port = Number(cb.port) || 80;
@@ -52,7 +53,7 @@ export async function startAuthorization(client, { timeoutMs = 10 * 60e3, onDone
   });
   return {
     authorization_url: auth.url, redirect_uri: auth.redirect_uri, scopes: auth.scopes, listening: true, listen_minutes: Math.round(timeoutMs / 60e3),
-    next_step: "Open the URL in a browser on this computer and approve. The page you land on confirms the setup; then call auth_status.",
+    next_step: `Open the URL in a browser and approve. If the browser runs on the same computer as this server, the page you land on confirms the setup; then call auth_status. If the browser is on another computer (remote or headless server), the redirect to ${auth.redirect_uri} will fail to load there: that is expected. Copy the full address from the browser's address bar (it contains ?code=...&state=...) and within 30 seconds pass it to exchange_code on this same server (the pending request lives in this process). Alternatively forward the port first (ssh -L ${port}:127.0.0.1:${port} <server>) so the redirect reaches this listener.`,
     _result: result,
   };
 }

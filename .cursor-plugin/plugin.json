@@ -1,7 +1,7 @@
 {
   "name": "personal-health-data-mcp",
   "displayName": "Personal Health Data (community)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Community plugin, not made or endorsed by Withings. Compatible with Withings: read-only MCP tools for your own Withings data (weight and body composition, blood pressure, daily activity, sleep, devices) through the Withings Public API, using your own Withings developer app.",
   "author": {
     "name": "Emil Niclas Hofseth",
@@ -32,7 +32,7 @@
       "WITHINGS_CLIENT_SECRET": {
         "type": "string",
         "title": "Withings app client secret",
-        "description": "The Secret of the same app. Stored by Cursor and sent only to Withings when tokens are issued or refreshed."
+        "description": "The Secret of the same app. Stored by Cursor and sent only to Withings when tokens are issued or refreshed. Other MCP clients: set it via WITHINGS_ENV_FILE (see README)."
       },
       "WITHINGS_REDIRECT_URI": {
         "type": "string",

@@ -1,7 +1,7 @@
 // Withings Public API client: OAuth 2.0 (authorization code + rotating refresh token), POST with retry.
 // Community code, not made or endorsed by Withings. Never logs the client secret, codes or tokens.
 import { randomBytes } from "node:crypto";
-import { closeSync, openSync, unlinkSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, unlinkSync, statSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,14 +12,20 @@ export const DASHBOARD = "https://developer.withings.com/dashboard/";
 export const DEFAULT_REDIRECT = "http://localhost:8765/callback";
 // Read-only scopes only. user.info = devices; user.metrics = body/BP; user.activity = activity + sleep. Never write scopes.
 export const SCOPES = ["user.info", "user.metrics", "user.activity"];
+// Scopes Withings may add to the grant on its own. user.sleepevents only drives sleep-event notifications (webhooks),
+// which this plugin never subscribes to; it is read-only either way.
+export const KNOWN_EXTRA_SCOPES = { "user.sleepevents": "Added by Withings to the grant; only used for sleep-event notifications (webhooks), which this plugin does not use. Read-only." };
 const REFRESH_MARGIN_MS = 10 * 60e3;
 const HEX40_RE = /\b[0-9a-f]{40}\b/gi;   // Withings access/refresh tokens and codes are 40-hex strings
 
 export const SETUP_HELP =
   "Withings is not set up yet. 1) Create a Withings developer app at " + DASHBOARD + " (Public API integration, " +
-  "Public Cloud) with the callback URL " + DEFAULT_REDIRECT + " (or another URL you control). 2) Paste its client id and " +
-  "secret into this plugin's WITHINGS_CLIENT_ID and WITHINGS_CLIENT_SECRET settings and reload. 3) Run the " +
-  "start_authorization tool (or `node server/cli.mjs authorize`) once and approve access in the browser.";
+  "Public Cloud) with the callback URL " + DEFAULT_REDIRECT + " (or another URL you control). 2) Give its client id and " +
+  "secret to this MCP server through your MCP client's settings for it: either WITHINGS_CLIENT_ID and " +
+  "WITHINGS_CLIENT_SECRET, or WITHINGS_ENV_FILE=<absolute path to a file with those KEY=value lines>. Restart or reload " +
+  "the server afterwards (for example in Cursor: Plugins -> Personal Health Data (community) -> Configure, then reload " +
+  "the window). 3) Run the start_authorization tool (or `node server/cli.mjs authorize`) once and approve access in " +
+  "the browser. Never paste the secret into chat.";
 
 export class WithingsError extends Error {
   constructor(message, status) { super(message); this.status = status; }
@@ -27,12 +33,42 @@ export class WithingsError extends Error {
 
 const unset = (v) => { const s = (v || "").trim(); return !s || /^\$\{.*\}$/.test(s) ? null : s; };
 
+// Names WITHINGS_ENV_FILE may set. Anything else in the file is ignored.
+export const ENV_FILE_KEYS = ["WITHINGS_CLIENT_ID", "WITHINGS_CLIENT_SECRET", "WITHINGS_REDIRECT_URI", "WITHINGS_TOKEN_FILE"];
+
+/**
+ * Parse a dotenv-style file (KEY=value per line; blank lines, `# comments` and an `export ` prefix allowed; values may
+ * be wrapped in single or double quotes). No shell expansion. Returns { values, error }. Never throws.
+ */
+export function readEnvFile(file) {
+  let text;
+  try { text = readFileSync(file, "utf8"); } catch (e) { return { values: {}, error: `WITHINGS_ENV_FILE (${file}) could not be read (${e.code || "error"}).` }; }
+  const values = {};
+  for (let line of text.split(/\r?\n/)) {
+    line = line.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (line.startsWith("export ")) line = line.slice(7).trim();
+    const i = line.indexOf("=");
+    if (i < 1) continue;
+    const k = line.slice(0, i).trim();
+    let v = line.slice(i + 1).trim();
+    if (v.length >= 2 && ((v[0] === '"' && v.at(-1) === '"') || (v[0] === "'" && v.at(-1) === "'"))) v = v.slice(1, -1);
+    if (ENV_FILE_KEYS.includes(k)) values[k] = v;
+  }
+  return { values, error: null };
+}
+
+/** Explicit environment variables win; WITHINGS_ENV_FILE fills whatever is unset (keeps secrets out of client configs). */
 export function readConfig(env = process.env) {
+  const envFile = unset(env.WITHINGS_ENV_FILE);
+  const file = envFile ? readEnvFile(envFile) : { values: {}, error: null };
+  const get = (k) => unset(env[k]) || unset(file.values[k]);
   return {
-    clientId: unset(env.WITHINGS_CLIENT_ID),
-    clientSecret: unset(env.WITHINGS_CLIENT_SECRET),
-    redirectUri: unset(env.WITHINGS_REDIRECT_URI) || DEFAULT_REDIRECT,
-    tokenFile: unset(env.WITHINGS_TOKEN_FILE) || defaultTokenFile(env),
+    clientId: get("WITHINGS_CLIENT_ID"),
+    clientSecret: get("WITHINGS_CLIENT_SECRET"),
+    redirectUri: get("WITHINGS_REDIRECT_URI") || DEFAULT_REDIRECT,
+    tokenFile: get("WITHINGS_TOKEN_FILE") || defaultTokenFile(env),
+    envFile, envFileError: file.error,
   };
 }
 
@@ -88,7 +124,7 @@ export class Client {
 
   requireApp() {
     const c = this.config;
-    if (!c.clientId || !c.clientSecret) throw new WithingsError(SETUP_HELP, 0);
+    if (!c.clientId || !c.clientSecret) throw new WithingsError(c.envFileError ? `${c.envFileError} ${SETUP_HELP}` : SETUP_HELP, 0);
     return c;
   }
 
@@ -130,7 +166,7 @@ export class Client {
     const b = r?.body || {};
     if (r?.status !== 0 || !b.access_token || !b.refresh_token) {
       const why = params.grant_type === "authorization_code"
-        ? " The code may have expired (Withings codes are valid for 30 seconds and single-use), or the callback URL does not match the one registered in your Withings app. Start the authorization again."
+        ? ` The code may have expired (Withings codes are valid for 30 seconds and single-use, and must be exchanged by the same server process that started the authorization), or the callback URL does not match. This server used redirect_uri=${params.redirect_uri}; it must equal, character for character, a Callback URL registered in your Withings app and the one used when the authorization started. Start the authorization again.`
         : " The refresh token was rejected (expired after a year, revoked in the Withings app, or replaced by another process). Run start_authorization again to re-authorize.";
       throw new WithingsError(`Withings token request failed (status ${r?.status}${r?.error ? `: ${this.redact(r.error)}` : ""}).${why}`, r?.status ?? 0);
     }
@@ -201,9 +237,14 @@ export class Client {
   async status() {
     const c = this.config;
     const t = await loadTokens(c.tokenFile).catch(() => null);
+    const granted = t?.scope ? String(t.scope).split(/[,\s]+/).filter(Boolean) : null;
+    const extra = granted ? granted.filter((x) => !SCOPES.includes(x)) : [];
     return {
-      client_configured: Boolean(c.clientId && c.clientSecret), redirect_uri: c.redirectUri, token_file: c.tokenFile,
-      authorized: Boolean(t?.refresh_token), scope: t?.scope ?? null,
+      client_configured: Boolean(c.clientId && c.clientSecret), env_file: c.envFile ?? null, env_file_problem: c.envFileError ?? null,
+      redirect_uri: c.redirectUri, token_file: c.tokenFile,
+      authorized: Boolean(t?.refresh_token),
+      requested_scopes: SCOPES, granted_scopes: granted,
+      extra_granted_scopes: extra.length ? Object.fromEntries(extra.map((x) => [x, KNOWN_EXTRA_SCOPES[x] ?? "Granted by Withings but not requested or used by this plugin."])) : null,
       access_token_valid_for_min: t ? Math.max(0, Math.round((this.expiresAt(t) - this.now()) / 60e3)) : null,
       last_token_at: t?.obtained_at ? new Date(t.obtained_at * 1000).toISOString() : null,
       refresh_token_expires_about: t?.obtained_at ? new Date((t.obtained_at + 365 * 86400) * 1000).toISOString().slice(0, 10) : null,

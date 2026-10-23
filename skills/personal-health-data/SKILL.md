@@ -17,10 +17,10 @@ Data shapes the tools return (all carry `data_source: "Withings"`; units are in 
 | Weight, body fat, muscle, water, bone, visceral fat, trends | `get_body_measurements` (default last 30 days) |
 | Blood pressure | `get_blood_pressure` |
 | Steps, activity minutes, calories | `get_daily_activity` (default 7 days) |
-| How did I sleep (Withings sleep mat / watch) | `get_sleep_summary` (default 7 days) |
+| How did I sleep (Withings sleep mat / watch) | `get_sleep_summary` (default 7 days; if empty, it returns a `hint`: check `list_devices`) |
 | Which devices, last sync, battery | `list_devices` |
 | Is it set up? | `auth_status` |
-| First-time setup or re-authorize | `start_authorization`, then (only if the callback is not localhost) `exchange_code` |
+| First-time setup or re-authorize | `start_authorization`, then `exchange_code` if the callback is not localhost or the browser is on another computer than the server |
 
 ## Rules
 - Dates are `YYYY-MM-DD` in the user's local time. Ranges up to 366 days per call. Fetch the smallest range that answers the question.
@@ -29,6 +29,9 @@ Data shapes the tools return (all carry `data_source: "Withings"`; units are in 
 - `source: "manual"` rows were typed in by hand; `ambiguous` means Withings was not sure whose weigh-in it was. Mention this when it matters.
 - Body composition from a scale is an estimate; describe trends over weeks, not day-to-day changes.
 - When you show this data in a chart, table or summary, say it comes from Withings (e.g. "Source: Withings").
-- Never ask the user to paste the client secret or tokens into chat. Setup values go into the plugin settings (WITHINGS_CLIENT_ID, WITHINGS_CLIENT_SECRET). The one-time authorization code is not a secret, but it expires in 30 seconds, so prefer the localhost callback or the CLI (`node server/cli.mjs authorize`).
+- Never ask the user to paste the client secret or tokens into chat. Setup values go wherever their MCP client keeps this server's settings: `WITHINGS_CLIENT_ID` / `WITHINGS_CLIENT_SECRET` as settings or env vars (in Cursor: Plugins → this plugin → Configure), or a `600` file named by `WITHINGS_ENV_FILE`. Then restart or reload the server.
+- The one-time authorization code is not a secret, but it expires in 30 seconds and must reach the same server process that ran `start_authorization`. If the browser is on the same computer as the server, the localhost callback finishes by itself. If not (remote or headless server), the redirect page fails to load; ask the user to copy the full address from the address bar and pass it to `exchange_code` right away, or use the CLI (`node server/cli.mjs authorize`), which accepts the paste too.
+- If authorization fails with a redirect URI problem, the server's `WITHINGS_REDIRECT_URI` (see `auth_status`) must match a Callback URL in the user's Withings app exactly (scheme, host, port, path, trailing slash).
+- `auth_status` lists `requested_scopes` (user.info, user.metrics, user.activity) and `granted_scopes`. Withings may add `user.sleepevents`; it is notification-only and unused. Don't present it as something the plugin asked for.
 - If a tool says the token was rejected or expired, run `start_authorization` again (re-authorize). Refresh tokens last about a year if unused and rotate on every refresh; the server handles that.
 - Not available here: writing or deleting data, ECG waveforms, raw intraday streams, notifications/webhooks.

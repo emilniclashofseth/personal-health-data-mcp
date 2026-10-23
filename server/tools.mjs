@@ -4,7 +4,7 @@
 //   DayActivity     = { date, steps, distance_km, floors, active_min, active_kcal, total_kcal, hr_avg, ... }
 //   NightSleep      = { date (wake day), start_local, end_local, total_sleep_min, deep/light/rem_min, sleep_score, ... }
 // Values are decoded (value * 10^unit). A missing metric is null, never 0. Every result carries data_source: "Withings".
-import { SETUP_HELP, WithingsError, resolveRange, addDays } from "./client.mjs";
+import { SCOPES, SETUP_HELP, WithingsError, resolveRange, addDays } from "./client.mjs";
 
 const SOURCE = "Withings";
 
@@ -111,6 +111,8 @@ async function measures(c, r, types) {
   return items.filter((g) => (g.category ?? 1) === 1).map((g) => decodeGroup(g, tz, types)).filter((g) => g.date >= r.start && g.date <= r.end && Object.keys(g.vals).length);
 }
 
+export const SLEEP_EMPTY_HINT = "No Withings sleep nights in this range. Withings sleep comes only from a sleep-tracking device (a sleep mat such as Sleep Analyzer, or a Withings watch with sleep tracking). Call list_devices to check that one is linked and has synced recently; if none is, this is not an error, just no sleep source in Withings. Use another source for sleep if you have one.";
+
 // ---------- tool table
 const range = (days) => ({
   start_date: { type: "string", description: `First calendar day, YYYY-MM-DD. Default: ${days - 1} days before end_date.` },
@@ -160,13 +162,14 @@ export const TOOLS = [
   },
   {
     name: "get_sleep_summary", title: "Sleep (nightly summary)",
-    description: "Nightly sleep from a Withings sleep mat or watch: total sleep, time in bed, deep/light/REM/awake minutes, efficiency, latency, wake-ups, sleep score, heart and breathing rate, snoring, breathing disturbances. A night is labelled by the day it ends. Default: last 7 days; up to 366 days.",
+    description: "Nightly sleep from a Withings sleep mat or watch: total sleep, time in bed, deep/light/REM/awake minutes, efficiency, latency, wake-ups, sleep score, heart and breathing rate, snoring, breathing disturbances. A night is labelled by the day it ends. Default: last 7 days; up to 366 days. An empty result carries a hint: check list_devices for a linked sleep device.",
     inputSchema: { type: "object", properties: { ...range(7) }, additionalProperties: false },
     annotations: RO,
     async run(c, a) {
       const r = resolveRange(a);
       const { items } = await c.paged("/v2/sleep", { action: "getsummary", startdateymd: r.start, enddateymd: r.end, data_fields: SLEEP_FIELDS }, "series");
-      return wrap(items.map(nightSleep).filter((x) => x.date >= r.start && x.date <= r.end).sort((x, y) => (x.end_local < y.end_local ? -1 : 1)), { range: r });
+      const rows = items.map(nightSleep).filter((x) => x.date >= r.start && x.date <= r.end).sort((x, y) => (x.end_local < y.end_local ? -1 : 1));
+      return wrap(rows, { range: r, ...(rows.length ? {} : { hint: SLEEP_EMPTY_HINT }) });
     },
   },
   {
@@ -178,14 +181,14 @@ export const TOOLS = [
   },
   {
     name: "auth_status", title: "Setup status",
-    description: "Shows whether the Withings app credentials are configured and whether you have authorized access: token file location, granted scopes, minutes left on the current access token. Never shows the secret or tokens.",
+    description: "Shows whether the Withings app credentials are configured (directly or via WITHINGS_ENV_FILE) and whether you have authorized access: token file location, the scopes this plugin requests (user.info, user.metrics, user.activity) and the scopes Withings actually granted (Withings may add user.sleepevents, which is notification-only and unused), minutes left on the current access token. Never shows the secret or tokens.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async run(c) { const st = await c.status(); return { ...st, next_step: !st.client_configured ? SETUP_HELP : !st.authorized ? "Run start_authorization and approve access in the browser." : null }; },
+    async run(c) { const st = await c.status(); return { ...st, next_step: !st.client_configured ? (st.env_file_problem ? `${st.env_file_problem} ${SETUP_HELP}` : SETUP_HELP) : !st.authorized ? "Run start_authorization and approve access in the browser." : null }; },
   },
   {
     name: "start_authorization", title: "Authorize (one time)",
-    description: "One-time setup step. Returns the Withings authorization URL for the user to open in a browser (read-only scopes: user.info, user.metrics, user.activity). If the callback URL is on localhost, this server listens there for 10 minutes and finishes the setup by itself; otherwise the user runs exchange_code (or the CLI) with the redirect URL within 30 seconds. Writes only the local token file.",
+    description: "One-time setup step. Returns the Withings authorization URL for the user to open in a browser. Requests the read-only scopes " + SCOPES.join(", ") + "; Withings may also add user.sleepevents to the grant (notification-only, unused here), which auth_status lists under extra_granted_scopes. If the callback URL is on localhost, this server listens there for 10 minutes and finishes the setup by itself when the browser runs on the same computer. If the browser is on another computer, or the callback is not localhost, the user copies the full redirect URL from the address bar and passes it to exchange_code on this same server within 30 seconds. Writes only the local token file.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async run(c) {
@@ -196,12 +199,14 @@ export const TOOLS = [
   },
   {
     name: "exchange_code", title: "Finish authorization (non-localhost callback)",
-    description: "Finishes the one-time authorization when the callback URL is not on localhost: pass the full URL the browser was redirected to (or just its code). Withings codes expire after 30 seconds and work once, so the CLI (`node server/cli.mjs authorize`) is easier. Saves the tokens to the local token file (chmod 600); never returns them.",
+    description: "Finishes the one-time authorization when the callback URL is not on localhost, or when the browser ran on a different computer than this server (the localhost redirect then fails to load in the browser, but its address still holds the code): pass the full URL from the browser's address bar (or just its code). Must be called on the same server process that ran start_authorization, within 30 seconds (Withings codes expire after 30 s and work once). Saves the tokens to the local token file (chmod 600); never returns them.",
     inputSchema: { type: "object", properties: { redirect_url_or_code: { type: "string", description: "The URL you were redirected to (contains ?code=...&state=...), or the code itself." } }, required: ["redirect_url_or_code"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async run(c, a) {
-      const { pendingState } = await import("./auth-flow.mjs");
-      return c.exchangeCode(a.redirect_url_or_code, { expectedState: pendingState() });
+      const { pendingState, stopListener } = await import("./auth-flow.mjs");
+      const out = await c.exchangeCode(a.redirect_url_or_code, { expectedState: pendingState() });
+      stopListener();
+      return out;
     },
   },
 ];

@@ -1,4 +1,10 @@
-# cursor.directory listing (final text). NOT SUBMITTED.
+# cursor.directory listing: PUBLISHED
+
+**Live listing:** https://cursor.directory/plugins/personal-health-data-community
+
+The text below is the listing copy as submitted (the live description matched it on 2026-10-23). The directory builds
+the install config from this repo's `mcp.json`. Changes to this file do not update the live listing; resubmit after the
+owner approves.
 
 **Name:** Personal Health Data (community)
 

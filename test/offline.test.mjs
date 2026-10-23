@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Client, readConfig, resolveRange, defaultTokenFile } from "../server/client.mjs";
+import { Client, readConfig, readEnvFile, resolveRange, defaultTokenFile } from "../server/client.mjs";
 import { makeHandler } from "../server/index.mjs";
 import { TOOLS, mergeSessions, decodeGroup, nightSleep, dayActivity } from "../server/tools.mjs";
-import { startAuthorization, stopListener } from "../server/auth-flow.mjs";
+import { startAuthorization, stopListener, pendingState } from "../server/auth-flow.mjs";
 
 const ID = "dummy-client-id", SECRET = "dummy-client-secret-xyz";
 const hex = (c) => c.repeat(40);
@@ -190,4 +190,76 @@ test("pure transforms keep nulls", () => {
   const g = decodeGroup({ date: 0, measures: [{ type: 999, value: 1, unit: 0 }] }, "UTC", [1]);
   assert.deepEqual(g.vals, {});
   assert.equal(mergeSessions([], [1]).length, 0);
+});
+
+test("WITHINGS_ENV_FILE: values read without shell expansion; explicit env wins; unknown keys ignored", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wpd-env-"));
+  const f = path.join(dir, "withings.env");
+  await writeFile(f, `# my Withings app\nexport WITHINGS_CLIENT_ID=${ID}\nWITHINGS_CLIENT_SECRET="${SECRET}"\nWITHINGS_REDIRECT_URI='http://localhost:9999/cb'\nWITHINGS_TOKEN_FILE=${dir}/t.json\nPATH=/evil\nOTHER=$HOME\n`, { mode: 0o600 });
+  const c = readConfig({ WITHINGS_ENV_FILE: f });
+  assert.deepEqual([c.clientId, c.clientSecret, c.redirectUri, c.tokenFile, c.envFileError], [ID, SECRET, "http://localhost:9999/cb", `${dir}/t.json`, null]);
+  assert.equal(readEnvFile(f).values.PATH, undefined);
+  // Cursor-style unexpanded placeholders count as unset, so the file fills them; a real env value wins.
+  const c2 = readConfig({ WITHINGS_ENV_FILE: f, WITHINGS_CLIENT_ID: "${WITHINGS_CLIENT_ID}", WITHINGS_REDIRECT_URI: "http://localhost:8765/callback" });
+  assert.deepEqual([c2.clientId, c2.redirectUri], [ID, "http://localhost:8765/callback"]);
+  // Secret from the file is used for token requests and redacted from errors.
+  const calls = [];
+  const client = new Client({ env: { WITHINGS_ENV_FILE: f }, pauseMs: 0, wait: async () => {}, fetchImpl: async (u, o) => { calls.push(Object.fromEntries(new URLSearchParams(o.body))); return json({ status: 503, error: `bad ${SECRET}` }); } });
+  const r = await call(makeHandler(client), "exchange_code", { redirect_url_or_code: "abc" });
+  assert.equal(calls[0].client_secret, SECRET);
+  assert.equal(r.isError, true); assert.ok(!r.content[0].text.includes(SECRET));
+});
+
+test("WITHINGS_ENV_FILE missing: setup help names the file, no request", async () => {
+  const calls = [];
+  const h = makeHandler(new Client({ env: { WITHINGS_ENV_FILE: "/nonexistent/withings.env" }, fetchImpl: async (u) => { calls.push(u); return json({}); } }));
+  const r = await call(h, "list_devices");
+  assert.equal(r.isError, true); assert.match(r.content[0].text, /WITHINGS_ENV_FILE .* could not be read \(ENOENT\)/); assert.equal(calls.length, 0);
+  const st = (await call(h, "auth_status")).structuredContent;
+  assert.equal(st.client_configured, false); assert.match(st.env_file_problem, /ENOENT/); assert.match(st.next_step, /WITHINGS_ENV_FILE/);
+});
+
+test("setup help is client-neutral", async () => {
+  const { SETUP_HELP } = await import("../server/client.mjs");
+  assert.match(SETUP_HELP, /MCP client/); assert.match(SETUP_HELP, /WITHINGS_ENV_FILE/);
+});
+
+test("auth_status separates requested scopes from what Withings granted (user.sleepevents explained)", async () => {
+  const { h } = await setup({ tokens: { ...fresh(), scope: "user.info,user.metrics,user.activity,user.sleepevents" } });
+  const st = (await call(h, "auth_status")).structuredContent;
+  assert.deepEqual(st.requested_scopes, ["user.info", "user.metrics", "user.activity"]);
+  assert.deepEqual(st.granted_scopes, ["user.info", "user.metrics", "user.activity", "user.sleepevents"]);
+  assert.match(st.extra_granted_scopes["user.sleepevents"], /notifications/);
+  const list = await h({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+  const sa = list.result.tools.find((t) => t.name === "start_authorization").description;
+  assert.match(sa, /user\.info, user\.metrics, user\.activity/); assert.match(sa, /user\.sleepevents/);
+});
+
+test("get_sleep_summary with no nights returns a hint pointing at list_devices", async () => {
+  const { h } = await setup({ tokens: fresh(), routes: [[/v2\/sleep#getsummary/, () => json({ status: 0, body: { series: [], more: false } })]] });
+  const r = await call(h, "get_sleep_summary", { start_date: "2026-10-01", end_date: "2026-10-07" });
+  assert.equal(r.isError, false); assert.equal(r.structuredContent.count, 0); assert.match(r.structuredContent.hint, /list_devices/);
+});
+
+test("remote browser: localhost listener pending, exchange_code with the pasted URL finishes and stops the listener", async () => {
+  const { client, h, tokenFile, env } = await setup();
+  env.WITHINGS_REDIRECT_URI = "http://localhost:18766/callback";
+  const r = await startAuthorization(client, { timeoutMs: 5000 });
+  assert.equal(r.listening, true); assert.match(r.next_step, /another computer/);
+  const st = new URL(r.authorization_url).searchParams.get("state");
+  const bad = await call(h, "exchange_code", { redirect_url_or_code: `http://localhost:18766/callback?code=x&state=wrong` });
+  assert.equal(bad.isError, true); assert.match(bad.content[0].text, /state/);
+  const ok = await call(h, "exchange_code", { redirect_url_or_code: `http://localhost:18766/callback?code=good&state=${st}` });
+  assert.equal(ok.isError, false, ok.content[0].text);
+  assert.ok(JSON.parse(await readFile(tokenFile, "utf8")).refresh_token);
+  assert.equal(pendingState(), null);
+  await assert.rejects(fetch("http://127.0.0.1:18766/callback"));   // listener closed
+});
+
+test("failed code exchange explains the redirect URI it used (mismatch troubleshooting)", async () => {
+  const calls = [];
+  const env = { WITHINGS_CLIENT_ID: ID, WITHINGS_CLIENT_SECRET: SECRET, WITHINGS_REDIRECT_URI: "https://example.com/cb" };
+  const h = makeHandler(new Client({ env, pauseMs: 0, wait: async () => {}, fetchImpl: async (u, o) => { calls.push(o); return json({ status: 503, error: "Invalid Params: invalid redirect_uri" }); } }));
+  const r = await call(h, "exchange_code", { redirect_url_or_code: "abc" });
+  assert.equal(r.isError, true); assert.match(r.content[0].text, /redirect_uri=https:\/\/example\.com\/cb/); assert.match(r.content[0].text, /character for character/);
 });

@@ -1,6 +1,6 @@
 {
   "name": "personal-health-data-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Community MCP server + Cursor plugin for your own Withings data via the Withings Public API (read-only). Not made or endorsed by Withings.",
   "type": "module",
   "private": true,
@@ -16,7 +16,7 @@
     "start": "node server/index.mjs",
     "authorize": "node server/cli.mjs authorize",
     "status": "node server/cli.mjs status",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.mjs",
     "test:live": "WITHINGS_LIVE=1 node --test test/live.test.mjs"
   },
   "repository": {
