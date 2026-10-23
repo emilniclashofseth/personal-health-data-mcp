@@ -1,8 +1,9 @@
 // Withings Public API client: OAuth 2.0 (authorization code + rotating refresh token), POST with retry.
 // Community code, not made or endorsed by Withings. Never logs the client secret, codes or tokens.
 import { randomBytes } from "node:crypto";
-import { closeSync, openSync, readFileSync, unlinkSync, statSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { closeSync, openSync, readFileSync, statSync } from "node:fs";
+import { chmod, mkdir, open, readFile, rename } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -225,29 +226,58 @@ export function defaultTokenFile(env = process.env) {
   return path.join(base, "personal-health-data-mcp", "tokens.json");
 }
 
-// ---- token store (file outside the repo, dir 700, file 600, atomic writes, simple cross-process lock)
+// ---- token store (file outside the repo, dir 700, file 600, atomic writes, cross-process lock)
 export async function loadTokens(file) {
   try { return JSON.parse(await readFile(file, "utf8")); } catch (e) { if (e.code === "ENOENT") return null; throw new WithingsError(`Token file is unreadable (${e.code || "invalid JSON"}). Re-authorize.`, 0); }
 }
 export async function saveTokens(file, tok) {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(tok), { mode: 0o600 });
+  const fh = await open(tmp, "w", 0o600);
+  try { await fh.writeFile(JSON.stringify(tok)); await fh.sync(); } finally { await fh.close(); }
   await chmod(tmp, 0o600);
-  await rename(tmp, file);
+  await rename(tmp, file);   // atomic: readers see the old or the new pair, never half a file
 }
-async function withLock(file, fn, { wait = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+
+// The lock is an exclusive flock(2) on the sidecar `<token file>.lock`, the same scheme as Python's
+// fcntl.flock(open(file + ".lock", "a"), LOCK_EX). The lock file is persistent and never unlinked (unlinking a
+// flock file breaks mutual exclusion). Node has no flock binding, so a tiny helper process holds the lock while
+// its stdin is open; if this process dies, stdin closes and the lock is released by the kernel.
+const LOCK_TIMEOUT_MS = 120e3;
+const LOCKERS = [
+  ["flock", (l) => ["-x", l, "sh", "-c", "echo L; exec cat >/dev/null"]],
+  ["perl", (l) => ["-e", "use Fcntl qw(:flock); open(my $f, '>>', $ARGV[0]) or exit 3; flock($f, LOCK_EX) or exit 4; $| = 1; print \"L\\n\"; <STDIN>;", l]],
+  ["python3", (l) => ["-c", "import fcntl,sys\nf=open(sys.argv[1],'a'); fcntl.flock(f,fcntl.LOCK_EX); print('L',flush=True); sys.stdin.read()", l]],
+];
+
+function flockVia([cmd, args], lock) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args(lock), { stdio: ["pipe", "pipe", "ignore"] });
+    let done = false;
+    const timer = setTimeout(() => { if (!done) { done = true; p.kill(); reject(new WithingsError("Token file is locked by another process; try again.", 0)); } }, LOCK_TIMEOUT_MS);
+    const fail = (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } };
+    p.on("error", fail);   // ENOENT: helper not installed, try the next one
+    p.on("exit", (code) => fail(Object.assign(new Error(`lock helper ${cmd} exited (${code})`), { code: "LOCK_HELPER" })));
+    p.stdout.on("data", (d) => {
+      if (done || !String(d).includes("L")) return;
+      done = true; clearTimeout(timer);
+      resolve(() => new Promise((r) => { if (p.exitCode !== null) return r(); p.once("exit", r); p.stdin.end(); }));
+    });
+  });
+}
+
+async function withLock(file, fn) {
   const lock = `${file}.lock`;
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  for (let i = 0; ; i++) {
-    try { closeSync(openSync(lock, "wx", 0o600)); break; } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-      try { if (Date.now() - statSync(lock).mtimeMs > 60e3) { unlinkSync(lock); continue; } } catch { /* gone */ }
-      if (i > 100) throw new WithingsError("Token file is locked by another process; try again.", 0);
-      await wait(100);
+  closeSync(openSync(lock, "a", 0o600)); await chmod(lock, 0o600);
+  let release = null;
+  if (process.platform !== "win32") {
+    for (const l of LOCKERS) {
+      try { release = await flockVia(l, lock); break; } catch (e) { if (e instanceof WithingsError) throw e; }
     }
   }
-  try { return await fn(); } finally { try { unlinkSync(lock); } catch { /* ignore */ } }
+  // No flock helper (e.g. Windows): this process still serialises its own refreshes (Client.pending).
+  try { return await fn(); } finally { if (release) await release(); }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -342,7 +372,7 @@ export class Client {
     const tok = await this.tokenRequest({ grant_type: "authorization_code", code, redirect_uri: c.redirectUri });
     tok.redirect_uri = c.redirectUri;
     const file = c.tokenFile;
-    await withLock(file, () => saveTokens(file, tok), { wait: this.wait });
+    await withLock(file, () => saveTokens(file, tok));
     this.tokens = tok;
     return { ok: true, token_file: file, scope: tok.scope, access_expires_in_s: tok.expires_in, redirect_uri: c.redirectUri };
   }
@@ -364,7 +394,7 @@ export class Client {
       await saveTokens(file, nt);   // the refresh token rotates: always persist the new pair at once
       this.tokens = nt;
       return nt.access_token;
-    }, { wait: this.wait }).finally(() => { this.pending = null; });
+    }).finally(() => { this.pending = null; });
     return this.pending;
   }
 

@@ -189,9 +189,12 @@ the token file outside any repository you commit.
   or to give separate installs separate files. The server creates the folder (`700`) and file (`600`) when you authorize.
 - **Sharing one token file between installs** (two MCP clients, two machines with a synced folder, a dev copy and an
   installed copy): the refresh token **rotates on every refresh** and the old one stops working soon after. Sharing is
-  only safe when every process is this plugin (same version or later) using the **same file on the same filesystem**,
-  because the plugin serialises refreshes with a lock file next to it (`tokens.json.lock`) and re-reads the file under
-  that lock. Don't share it with other Withings tools, copy it between machines, or put it on a synced/network folder
+  only safe when every process uses the **same file on the same filesystem** and the same lock: an exclusive
+  `flock` on the sidecar file `<token file>.lock` (for example `tokens.json.lock`), re-reading the token file after
+  taking the lock and saving by atomic rename. This plugin does that from v0.3.1 (through the `flock`, `perl` or
+  `python3` command; on Windows it only serialises within one process). Your own script can join in, e.g. Python:
+  `fcntl.flock(open(path + ".lock", "a"), fcntl.LOCK_EX)`. Never delete the lock file. Don't share the token file
+  with tools that lock differently, copy it between machines, or put it on a synced/network folder
   where the lock doesn't work: one side will refresh, the other will keep an outdated refresh token, and you'll have
   to re-authorize. If in doubt, give each install its own `WITHINGS_TOKEN_FILE` and authorize each once.
 - Per Withings' docs (https://developer.withings.com/developer-guide/v3/integration-guide/public-health-data-api/get-access/access-and-refresh-tokens-no-recover):

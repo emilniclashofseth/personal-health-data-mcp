@@ -1,7 +1,7 @@
 {
   "name": "personal-health-data-mcp",
   "displayName": "Personal Health Data (community)",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Unofficial community plugin, not affiliated with or endorsed by Withings. Compatible with Withings: read-only MCP tools for your own Withings data (weight and body composition, blood pressure, daily activity, sleep, devices) through the Withings Public API, using your own Withings developer app. Runs locally; sends nothing to the author. General wellness information, not medical advice. Register callback http://localhost:8765/callback (the default) or set WITHINGS_REDIRECT_URI to the exact Callback URL in your app.",
   "author": {
     "name": "Emil Niclas Hofseth",

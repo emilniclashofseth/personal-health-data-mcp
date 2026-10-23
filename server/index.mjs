@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { Client, WithingsError } from "./client.mjs";
 import { TOOLS } from "./tools.mjs";
 
-export const SERVER_INFO = { name: "personal-health-data", title: "Personal Health Data (community) · Compatible with Withings", version: "0.3.0" };
+export const SERVER_INFO = { name: "personal-health-data", title: "Personal Health Data (community) · Compatible with Withings", version: "0.3.1" };
 const PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 export function makeHandler(client = new Client()) {
