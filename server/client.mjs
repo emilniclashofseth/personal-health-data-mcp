@@ -252,7 +252,8 @@ const LOCKERS = [
 
 function flockVia([cmd, args], lock) {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args(lock), { stdio: ["pipe", "pipe", "ignore"] });
+    const p = spawn(cmd, args(lock), { stdio: ["pipe", "pipe", "ignore"], env: { PATH: process.env.PATH || "/usr/bin:/bin" } });   // no secrets in the helper env
+    p.stdin.on("error", () => {});   // EPIPE if the helper is already gone
     let done = false;
     const timer = setTimeout(() => { if (!done) { done = true; p.kill(); reject(new WithingsError("Token file is locked by another process; try again.", 0)); } }, LOCK_TIMEOUT_MS);
     const fail = (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } };
@@ -261,7 +262,7 @@ function flockVia([cmd, args], lock) {
     p.stdout.on("data", (d) => {
       if (done || !String(d).includes("L")) return;
       done = true; clearTimeout(timer);
-      resolve(() => new Promise((r) => { if (p.exitCode !== null) return r(); p.once("exit", r); p.stdin.end(); }));
+      resolve(() => new Promise((r) => { if (p.exitCode !== null || p.signalCode !== null) return r(); p.once("exit", r); p.stdin.end(); }));   // killed by a signal: exitCode stays null
     });
   });
 }

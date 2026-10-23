@@ -574,3 +574,16 @@ test("token lock: an exclusive flock on <token file>.lock serialises refreshers 
   await cl.accessToken();
   assert.equal(probe, "busy");
 });
+
+test("token lock: a helper killed by a signal while holding the lock does not hang the refresh", { skip: process.platform === "win32" }, async () => {
+  const { spawnSync } = await import("node:child_process");
+  if (spawnSync("pkill", ["-V"]).status !== 0) return;
+  const a = await setup({ tokens: { ...fresh(), obtained_at: Math.floor(Date.now() / 1000) - 4 * 3600 } });
+  const cl = new Client({ env: a.env, pauseMs: 0, wait: async () => {}, fetchImpl: async () => {
+    spawnSync("pkill", ["-9", "-f", a.tokenFile + ".lock"]);   // the helper (flock, perl or python3) dies mid-hold
+    await new Promise((r) => setTimeout(r, 100));
+    return json({ status: 0, body: { access_token: hex("e"), refresh_token: hex("f"), expires_in: 10800 } });
+  } });
+  const settled = await Promise.race([cl.accessToken(), new Promise((r) => setTimeout(() => r("hang"), 3000))]);
+  assert.equal(settled, hex("e"));
+});
