@@ -2,10 +2,11 @@
 
 **Live listing:** https://cursor.directory/plugins/personal-health-data-community
 
-The text below is the listing copy to submit. The live description matched the previous text on 2026-10-23; this file
-was updated the same day for the callback default and the setup guide, and has not been resubmitted. The directory builds
-the install config from this repo's `mcp.json`. Changes to this file do not update the live listing; resubmit after the
-owner approves.
+The text below is the listing copy. The live listing was last updated on 2026-10-23 for v0.3.0 by an owner edit:
+the description matches the text below and the Skill component holds `skills/personal-health-data/SKILL.md`. The
+directory builds the install config from this repo's `mcp.json`. Changes here do not reach the live listing by
+themselves: update it with the owner's Edit form on the listing (Description and Skill content). Never resubmit the
+repo, which creates a duplicate listing the owner can't delete.
 
 **Name:** Personal Health Data (community)
 
