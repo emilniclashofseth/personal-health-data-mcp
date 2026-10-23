@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Docs: Disclaimer section (general wellness only, not medical advice; the author receives no data; unofficial; provided as is). LICENSE trademark line now names Withings (it wrongly named Garmin). Skill and server instructions tell the agent not to diagnose and to refer concerning readings to a professional.
+
 ## 0.3.0 — 2026-10-23
 
 - `auth_status` and `start_authorization` name the redirect URI the running process will send, whether it was configured or fell back to the default `http://localhost:8765/callback`, and that it must match a Callback URL in the user's Withings app exactly. This is shown before the user opens Withings, instead of only after Withings returns `redirect_uri_mismatch`.

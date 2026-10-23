@@ -13,7 +13,7 @@ repo, which creates a duplicate listing the owner can't delete.
 **Tagline:** Compatible with Withings
 
 **Description:**
-Community plugin, not made or endorsed by Withings. Read-only access to your own Withings data (weight, body composition, blood pressure, activity, sleep) via your own developer app. Setup is copy-paste: the callback must match the Withings app exactly; the default is http://localhost:8765/callback (docs/SETUP-WITHINGS.md).
+Unofficial community plugin, not affiliated with or endorsed by Withings. General wellness information, not medical advice. Read-only access to your own Withings data (weight, body composition, blood pressure, activity, sleep) via your own developer app. Setup is copy-paste: the callback must match the Withings app exactly; the default is http://localhost:8765/callback (docs/SETUP-WITHINGS.md).
 
 **Repository:** https://github.com/emilniclashofseth/personal-health-data-mcp
 
@@ -22,7 +22,9 @@ Community plugin, not made or endorsed by Withings. Read-only access to your own
 **Keywords:** withings, public-api, health, body-composition, weight, blood-pressure, sleep, activity, mcp
 
 Notes for the listing page:
-- Uses the official Withings Public API with a developer app that you create, so it reads only your own data and
-  requests only read scopes. Runs as a local MCP server (Node.js 18+, no dependencies). No hosted service, no telemetry.
+- Uses the Withings Public API with a developer app that you create, so it reads only your own data and
+  requests only read scopes. Runs as a local MCP server (Node.js 18+, no dependencies). No hosted service, no telemetry; the author never receives your credentials or data.
+- For general wellness and informational use only: not a medical device and not medical advice. Provided as is, without
+  warranty; use at your own risk. You are responsible for Withings' terms and your own data.
 - Withings data sharing with third-party services may require an active Withings+ subscription (Withings Terms of Use §6.4.1).
 - Withings is a trademark of Withings. No Withings logo is used.

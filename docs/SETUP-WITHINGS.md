@@ -2,6 +2,8 @@
 
 This is not super straightforward, but if you follow the steps exactly it should be fine. It is mostly copy-pasting. The first time takes about 10–15 minutes.
 
+This is an unofficial community plugin, compatible with Withings and not affiliated with, endorsed or sponsored by Withings. It is for general wellness information, not medical advice. It runs on your computer (or your assistant's) and sends nothing to its author.
+
 You do this once. After it works, you just ask about your weight, blood pressure, activity, sleep, or devices.
 
 The plugin cannot see the Withings website, so it cannot click through this for you. An assistant can walk you through it one step at a time: ask it to set up Withings. It should call `setup_guide` and give you **one step, then wait**. The steps below are the same ones, in the same order.

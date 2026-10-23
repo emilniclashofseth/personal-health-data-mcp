@@ -2,8 +2,9 @@
 
 *Compatible with Withings.*
 
-**A personal, community-built plugin. It is not made, endorsed, or supported by Withings.**
-It reads **only your own data**, through the official Withings Public API (https://developer.withings.com), using a
+**An unofficial, community-built plugin. It is not affiliated with, endorsed or sponsored by Withings.**
+For general wellness and informational use only. It is not a medical device and not medical advice (see [Disclaimer](#disclaimer)).
+It reads **only your own data**, through Withings' Public API (https://developer.withings.com), using a
 Withings developer app that **you** create for yourself. It is read-only: it cannot change anything in your Withings
 account or on your devices.
 
@@ -208,10 +209,14 @@ the token file outside any repository you commit.
 - The client secret is stored either by your MCP client (e.g. Cursor's plugin settings) and passed to the local server
   as an environment variable, or in a file you control (`WITHINGS_ENV_FILE`) that the server reads at runtime. It is sent only to Withings (`wbsapi.withings.net`), and only when tokens are issued or refreshed.
 - Errors are redacted. The secret, codes and tokens are never logged or returned by any tool.
-- No telemetry, no third-party servers. Your data goes from Withings to your computer and to the AI model you use in
-  your client. Make sure you are comfortable sharing health data with that model.
+- No telemetry, no third-party servers, no server run by the author. The code sends requests only to Withings. Your data
+  goes from Withings to the computer running the server and then to your MCP client and the AI model you use there,
+  under those providers' terms. Make sure you are comfortable sharing health data with that model.
+- The author of this plugin does not receive, store or have access to your credentials, tokens or data. Tokens are
+  kept only in the local token file described above.
 - This is for **your own data**. Don't use it to run a service for other people, and don't share your app's secret.
-  Each person who installs the plugin creates their own Withings app, so nobody's data passes through anyone else.
+  Each person who installs the plugin creates their own Withings app, so no one else's app or server sits between you
+  and Withings.
 
 ## Troubleshooting
 The same cases, with the wording to expect, are in [docs/SETUP-WITHINGS.md](docs/SETUP-WITHINGS.md) ("If you get this error, do this").
@@ -265,5 +270,22 @@ No dependencies, no install step (`npm ci` works with the empty lockfile but isn
 callback listener), `server/setup-guide.mjs` (the walkthrough `setup_guide` returns), `server/tools.mjs` (tools and output shapes), `server/index.mjs` (MCP stdio JSON-RPC),
 `server/cli.mjs` (setup CLI). The human setup steps are `docs/SETUP-WITHINGS.md`.
 
+## Disclaimer
+- **Not medical advice.** This plugin retrieves data you already have in your Withings account, for general wellness
+  and informational purposes only. It is not a medical device and is not intended to diagnose, treat, cure, monitor or
+  prevent any disease or condition. Values (including blood pressure, heart rate and the device's own estimates such
+  as body composition, metabolic or vascular age) come from consumer devices, may be missing or inaccurate, and are
+  passed on as Withings reports them. Don't make medical decisions based on them; ask a doctor or other qualified
+  health professional about any health concern. Any interpretation an AI assistant adds is the assistant's, not this
+  plugin's.
+- **Your data.** The plugin runs on the computer where you start it and talks only to Withings, using your own
+  developer app. It has no telemetry and no server of its own, and the author does not receive, store or have access to
+  your credentials, tokens or data. Your MCP client and AI model provider handle the data under their own terms, which
+  you choose.
+- **Unofficial.** Community project, compatible with Withings; not affiliated with, endorsed or sponsored by Withings.
+  Withings is a trademark of Withings, used only to say what the plugin is compatible with.
+- **Provided as is, use at your own risk.** No warranty of any kind (see `LICENSE`). You are responsible for following
+  Withings' terms (Terms of Use and developer/API terms) and for your own data.
+
 ## License
-MIT. See `LICENSE`. Not affiliated with Withings.
+MIT (provided "as is", without warranty). See `LICENSE`. Not affiliated with Withings.
