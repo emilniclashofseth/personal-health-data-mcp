@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.*
+tokens.json
+*.tokens.json
+*.lock
+.DS_Store

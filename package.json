@@ -1,0 +1,27 @@
+{
+  "name": "personal-health-data-mcp",
+  "version": "0.1.0",
+  "description": "Community MCP server + Cursor plugin for your own Withings data via the Withings Public API (read-only). Not made or endorsed by Withings.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "personal-health-data-mcp": "server/index.mjs",
+    "personal-health-data-setup": "server/cli.mjs"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "authorize": "node server/cli.mjs authorize",
+    "status": "node server/cli.mjs status",
+    "test": "node --test test/",
+    "test:live": "WITHINGS_LIVE=1 node --test test/live.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emilniclashofseth/personal-health-data-mcp.git"
+  },
+  "author": "Emil Niclas Hofseth"
+}

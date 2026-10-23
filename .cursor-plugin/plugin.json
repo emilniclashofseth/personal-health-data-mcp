@@ -1,0 +1,50 @@
+{
+  "name": "personal-health-data-mcp",
+  "displayName": "Personal Health Data (community)",
+  "version": "0.1.0",
+  "description": "Community plugin, not made or endorsed by Withings. Compatible with Withings: read-only MCP tools for your own Withings data (weight and body composition, blood pressure, daily activity, sleep, devices) through the Withings Public API, using your own Withings developer app.",
+  "author": {
+    "name": "Emil Niclas Hofseth",
+    "url": "https://github.com/emilniclashofseth"
+  },
+  "license": "MIT",
+  "keywords": [
+    "withings",
+    "public-api",
+    "health",
+    "body-composition",
+    "weight",
+    "blood-pressure",
+    "sleep",
+    "activity",
+    "mcp",
+    "community"
+  ],
+  "logo": "assets/logo.svg",
+  "variables": {
+    "type": "object",
+    "properties": {
+      "WITHINGS_CLIENT_ID": {
+        "type": "string",
+        "title": "Withings app client id",
+        "description": "The Client ID of your own Withings developer app (https://developer.withings.com/dashboard/)."
+      },
+      "WITHINGS_CLIENT_SECRET": {
+        "type": "string",
+        "title": "Withings app client secret",
+        "description": "The Secret of the same app. Stored by Cursor and sent only to Withings when tokens are issued or refreshed."
+      },
+      "WITHINGS_REDIRECT_URI": {
+        "type": "string",
+        "title": "Callback URL (optional)",
+        "description": "Must match a Callback URL registered in your Withings app exactly. Default: http://localhost:8765/callback."
+      }
+    },
+    "required": [
+      "WITHINGS_CLIENT_ID",
+      "WITHINGS_CLIENT_SECRET"
+    ]
+  },
+  "repository": "https://github.com/emilniclashofseth/personal-health-data-mcp",
+  "homepage": "https://github.com/emilniclashofseth/personal-health-data-mcp#readme"
+}

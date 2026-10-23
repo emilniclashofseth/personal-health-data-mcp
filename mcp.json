@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "personal-health-data": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CURSOR_PLUGIN_ROOT}/server/index.mjs"],
+      "env": {
+        "WITHINGS_CLIENT_ID": "${WITHINGS_CLIENT_ID}",
+        "WITHINGS_CLIENT_SECRET": "${WITHINGS_CLIENT_SECRET}",
+        "WITHINGS_REDIRECT_URI": "${WITHINGS_REDIRECT_URI}"
+      }
+    }
+  }
+}
