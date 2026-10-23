@@ -17,7 +17,7 @@ skill that tells the agent when to use the tools. It works with any MCP client t
 
 ## New here? Start with the walkthrough
 
-Setting this up is not super straightforward, but if you follow the steps exactly it should be fine. It is mostly copy-pasting.
+Setting this up is not super straightforward, but if you follow the steps exactly it should be fine. It is mostly copy-pasting. The first time takes about 10–15 minutes.
 
 **[docs/SETUP-WITHINGS.md](docs/SETUP-WITHINGS.md)** is the step-by-step for someone who has never used a developer portal. The short version of the callback: if you do not have a website, register exactly `http://localhost:8765/callback` (the plugin's default; it can answer that address on your own computer). An assistant should call `setup_guide` and give you one step at a time. Before anyone opens the Withings link, `auth_status` / `start_authorization` name the redirect the running process will actually send, and whether that value was configured or just the default.
 
@@ -54,7 +54,7 @@ node server/index.mjs          # stdio MCP server (normally your MCP client star
 
 In Cursor you can instead install it from the directory: https://cursor.directory/plugins/personal-health-data-community
 
-## Setup (about 5 minutes, once)
+## Setup (about 10–15 minutes the first time)
 
 Follow **[docs/SETUP-WITHINGS.md](docs/SETUP-WITHINGS.md)** if this is your first time. The rest of this section is the same setup, shorter, for reference.
 
@@ -127,19 +127,20 @@ you're done. With your own HTTPS callback, paste the full redirect URL when the 
 
 Then ask something like "How has my weight and body fat changed this month?"
 
-#### Browser and server on different computers (headless / remote server)
+#### Browser and server on different computers
 The localhost callback only completes by itself when the browser runs on the **same machine** as the server, because
-Withings redirects your browser to `http://localhost:8765/callback`, i.e. to the browser's own machine. If the server
-runs elsewhere (a remote box, a container, an SSH session):
-1. **Paste the redirect URL (no setup needed).** Approve in the browser. The redirect page then fails to load ("can't
-   connect"): that's expected. The address bar still holds `http://localhost:8765/callback?code=…&state=…`. Copy the
-   whole address and, **within 30 seconds**:
-   - with the agent: pass it to the `exchange_code` tool. It must go to the **same server process** that ran
-     `start_authorization` (the pending request and its `state` live in that process; restarting the server or using
-     another install starts over);
-   - with the CLI: paste it at the `Redirect URL (or wait):` prompt of the same `node server/cli.mjs authorize` run.
-2. **Or forward the port** before you approve: `ssh -L 8765:127.0.0.1:8765 you@server`, then the redirect reaches the
-   server's listener through the tunnel and finishes by itself.
+Withings redirects your browser to `http://localhost:8765/callback`, i.e. to the browser's own machine.
+
+The common case for a hosted assistant is exactly that: the plugin runs on the assistant's computer, and your browser
+is on your own computer. The localhost page fails to load. That is expected. Copy the whole address from the address
+bar (`http://localhost:8765/callback?code=…&state=…`) and paste it back to the assistant **right away** (within 30
+seconds). The assistant passes it to `exchange_code` on the **same server process** that ran `start_authorization`.
+
+The same paste works if the server is a remote box, a container, or an SSH session. At the CLI, paste it at the
+`Redirect URL (or wait):` prompt of the same `node server/cli.mjs authorize` run.
+
+Or forward the port before you approve: `ssh -L 8765:127.0.0.1:8765 you@server`, then the redirect reaches the
+server's listener through the tunnel and finishes by itself.
 
 ## Use with other MCP clients (Grok Bot, Claude Desktop, etc.)
 The bundled `mcp.json` is for Cursor: `${CURSOR_PLUGIN_ROOT}` and `${WITHINGS_…}` are Cursor plugin variables, and
@@ -223,9 +224,11 @@ The same cases, with the wording to expect, are in [docs/SETUP-WITHINGS.md](docs
   If `redirect_uri_source` is `environment`, restart or reload so a new process starts. If it is `env_file`, the next
   auth call re-reads the file; a set environment variable still wins (`config_stale_warning`). Then run
   `start_authorization` again. The code from the failed attempt can't be reused.
-- **Changed the settings but the old callback is still in use.** Compare `process_started_at` with when you edited.
+- **Changed the settings but the old value is still in use.** Compare `process_started_at` with when you edited.
   Environment variables are frozen for the life of the process (a Cursor reload that does not actually respawn the
-  server leaves the old value). The env file is not frozen. `config_note` says which one this process used.
+  server leaves the old value). The env file is not frozen. `config_note` says which redirect this process used.
+  `config_stale_warning` is set when the env file and the environment disagree. For the redirect it names both URLs.
+  For `WITHINGS_CLIENT_ID` or `WITHINGS_CLIENT_SECRET` it names the variable only and does not print the value.
 - **Code expired / invalid (status 304, "invalid code").** Codes last about 30 seconds, work once, and must be
   exchanged by the same server process that started the authorization. `exchange_code` says this separately from a
   callback mismatch. Run `start_authorization` again and paste the new address immediately. If the pasted address's
@@ -235,8 +238,9 @@ The same cases, with the wording to expect, are in [docs/SETUP-WITHINGS.md](docs
   (only Cursor expands it). Use an absolute `WITHINGS_ENV_FILE`. `auth_status` shows `env_file_problem` if the file
   can't be read.
 - **State mismatch**: the pasted redirect belongs to a different `start_authorization`. Start again; don't reuse the code.
-- **The localhost page will not load:** the browser is not on the same computer as the server. Copy the full address
-  bar within 30 seconds into `exchange_code`, or forward the port (`ssh -L 8765:127.0.0.1:8765 you@server`).
+- **The localhost page will not load:** the browser is not on the same computer as the plugin. That includes a hosted
+  assistant (plugin on the assistant's computer, browser on yours). Copy the full address bar and paste it back to
+  the assistant within 30 seconds, or forward the port (`ssh -L 8765:127.0.0.1:8765 you@server`).
 - **Port 8765 in use**: free it, or register another localhost port and set `WITHINGS_REDIRECT_URI` to match.
 - **Token rejected after it worked before**: see "Sharing one token file" above; re-authorize. If you changed the
   callback since authorizing, `redirect_changed_warning` says so; data calls keep working until you re-authorize.

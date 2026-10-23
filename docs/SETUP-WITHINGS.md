@@ -1,6 +1,6 @@
 # Set up Withings (for the first time)
 
-This is not super straightforward, but if you follow the steps exactly it should be fine. It is mostly copy-pasting.
+This is not super straightforward, but if you follow the steps exactly it should be fine. It is mostly copy-pasting. The first time takes about 10–15 minutes.
 
 You do this once. After it works, you just ask about your weight, blood pressure, activity, sleep, or devices.
 
@@ -16,7 +16,7 @@ If you do not have a website, use this callback exactly. Nothing added, nothing 
 http://localhost:8765/callback
 ```
 
-That is the plugin's default. You do not need to host anything. When the plugin runs on the same computer as your browser, it answers that address itself. When the plugin runs on a different computer, the page will fail to load; you copy the address bar instead (step 7). The one-time code in that address stays on your machine. Do not send it to someone else's website.
+That is the plugin's default. You do not need to host anything. When the plugin runs on the same computer as your browser, it answers that address itself. Often it does not: a hosted assistant runs the plugin on the assistant's computer, and your browser is on yours. The page then fails to load, and you copy the address bar back to the assistant (step 7). The one-time code in that address stays between you and that assistant. Do not send it to someone else's website.
 
 `localhost` and `127.0.0.1` are not the same. A trailing slash is not the same. `http` and `https` are not the same.
 
@@ -108,12 +108,11 @@ Then open the link, sign in to Withings, and approve. The plugin only asks to re
 
 Withings' code lasts about 30 seconds and works once. It has to reach the **same** server that created the link. Restarting that server in between throws the code away.
 
-**Browser on the same computer as the server, callback `http://localhost:8765/callback`.** The page should say you are connected. This step is done.
+**Browser on the same computer as the plugin, callback `http://localhost:8765/callback`.** The page should say you are connected. This step is done.
 
-**Browser on another computer** (a remote or headless server, a container, an SSH session). Withings sends the browser to `http://localhost:8765/callback` on the computer where the browser is, not to the server. The page fails to load. That is expected. Copy the **entire** address from the address bar (it contains `code=` and `state=`) and, within 30 seconds:
+**Hosted assistant (the usual case).** The plugin runs on the assistant's computer. Your browser is on your own computer. Withings opens `http://localhost:8765/callback` on your computer, where nothing is waiting. The page fails to load. That is expected. Copy the **entire** address from the address bar (it contains `code=` and `state=`) and paste it back to the assistant right away, within 30 seconds. The assistant gives it to this same server.
 
-- give it to the assistant as the `exchange_code` value, on that same server, or
-- paste it at the CLI prompt of the same `authorize` command.
+The same thing happens if the plugin is on any other remote or headless computer (a container, an SSH session). Paste the address back the same way, or paste it at the CLI prompt of the same `authorize` command.
 
 Or, before you approve, forward the port so the page can load: `ssh -L 8765:127.0.0.1:8765 you@server`.
 
@@ -134,14 +133,14 @@ Ask the assistant for status, or run `node server/cli.mjs status`.
 **You changed the setting, but status still shows `http://localhost:8765/callback`.** Read `redirect_uri_source` and `process_started_at`.
 
 - `default` — `WITHINGS_REDIRECT_URI` is still unset for this process. The env file either does not set it, or could not be read (`env_file_problem`), or an empty plugin setting is hiding it.
-- `environment` — the value was copied in when this process started. Reloading the window starts a new process. Editing the env file will not override it. If `config_stale_warning` is set, the file and the environment disagree and the environment is the one in use.
+- `environment` — the value was copied in when this process started. Reloading the window starts a new process. Editing the env file will not override it. If `config_stale_warning` is set, the file and the environment disagree and the environment is the one in use. The same warning names `WITHINGS_CLIENT_ID` or `WITHINGS_CLIENT_SECRET` when those disagree. It does not print either value.
 - `env_file` — the file was read at `config_read_at`. You are looking at the latest contents of the file named by `env_file`.
 
 **`exchange_code` says the code was rejected, or Withings says `invalid code` (status 304).** The code expired, was already used, or went to a different server process. Run `start_authorization` again and paste the new address immediately. Do not retry the old one.
 
 **`exchange_code` says the address you pasted is for a different callback, and the code was not sent.** Good: it was not used up. The message names both URLs. Make them the same (Withings app, or `WITHINGS_REDIRECT_URI`), restart if you changed the environment, then start authorization again.
 
-**The redirect page will not load.** See step 7. Copy the address bar anyway if you are on another computer.
+**The redirect page will not load.** See step 7. That is normal when a hosted assistant runs the plugin and your browser is on your computer. Copy the address bar and paste it back to the assistant right away.
 
 **"Could not listen" / port 8765 is in use.** Free the port, or pick another localhost URL, register that exact URL in Withings, set `WITHINGS_REDIRECT_URI` to it, and restart if you set it in the environment.
 

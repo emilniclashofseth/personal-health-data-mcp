@@ -42,7 +42,7 @@ export async function startAuthorization(client, { timeoutMs = 10 * 60e3, onDone
   if (!local) {
     return {
       authorization_url: auth.url, ...fields, scopes: auth.scopes, listening: false,
-      next_step: `${guard} Open the URL, approve, then within 30 seconds pass the full URL you land on to exchange_code on this same server (or run \`node server/cli.mjs authorize\`, which asks for it). Do not send that address anywhere else. The redirect URL must match a Callback URL registered in your Withings app exactly, or Withings shows redirect_uri_mismatch and no code.`,
+      next_step: `${guard} Open the URL, approve, then within 30 seconds paste the full address from the browser back to the assistant (or to \`node server/cli.mjs authorize\`, which asks for it) so it can call exchange_code on this same server. Do not send that address anywhere else. The redirect URL must match a Callback URL registered in your Withings app exactly, or Withings shows redirect_uri_mismatch and no code.`,
     };
   }
   const port = Number(cb.port) || 80;
@@ -70,7 +70,7 @@ export async function startAuthorization(client, { timeoutMs = 10 * 60e3, onDone
   });
   return {
     authorization_url: auth.url, ...fields, scopes: auth.scopes, listening: true, listen_minutes: Math.round(timeoutMs / 60e3),
-    next_step: `${guard} Open the URL in a browser and approve. If the browser runs on the same computer as this server, the page you land on confirms the setup; then call auth_status. If the browser is on another computer (remote or headless server), the redirect to ${auth.redirect_uri} will fail to load there: that is expected. Copy the full address from the browser's address bar (it contains ?code=...&state=...) and within 30 seconds pass it to exchange_code on this same server (the pending request lives in this process). Do not send that address anywhere else. Alternatively forward the port first (ssh -L ${port}:127.0.0.1:${port} <server>) so the redirect reaches this listener.`,
+    next_step: `${guard} Open the URL in a browser and approve. If the browser runs on the same computer as this server, the page you land on confirms the setup; then call auth_status. If the browser is on another computer, the redirect to ${auth.redirect_uri} will fail to load there: that is expected. This is the usual case for a hosted assistant (this plugin runs on the assistant's computer and the browser is on the user's computer), and also for a remote or headless server. Copy the full address from the browser's address bar (it contains ?code=...&state=...) and paste it back to the assistant within 30 seconds so it can call exchange_code on this same server (the pending request lives in this process). Do not send that address anywhere else. Alternatively forward the port first (ssh -L ${port}:127.0.0.1:${port} <server>) so the redirect reaches this listener.`,
     _result: result,
   };
 }

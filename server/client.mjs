@@ -94,6 +94,22 @@ export function pasteMismatchMessage(pasted, c) {
     "If it comes from the env file, the next attempt re-reads the file. Do not reuse this code.";
 }
 
+/**
+ * Form used only to compare a pasted redirect with the configured one.
+ * Scheme and host are lowercased, a default port (:443 / :80) is dropped, and an empty path is "/".
+ * A trailing slash on any other path is kept. localhost and 127.0.0.1 stay different.
+ * Returns null when `value` is not an http(s) URL.
+ */
+export function callbackKey(value) {
+  let u;
+  try { u = new URL(String(value || "").trim()); }
+  catch { return null; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  u.hash = "";
+  const q = u.searchParams.toString();
+  return `${u.origin}${u.pathname}${q ? `?${q}` : ""}`;
+}
+
 /** Pull a code out of a pasted redirect URL. Never returns the query string that held the code. */
 export function parseAuthInput(codeOrUrl) {
   const raw = String(codeOrUrl || "").trim();
@@ -170,13 +186,24 @@ export function readConfig(env = process.env, now = Date.now) {
     configReadAt: new Date(clock()).toISOString(),
     processStartedAt: PROCESS_STARTED_AT,
   };
-  let configStaleWarning = null;
-  if (envRedirect && fileRedirect && envRedirect !== fileRedirect) {
-    configStaleWarning = `WITHINGS_REDIRECT_URI in the environment is ${envRedirect}, which overrides ${fileRedirect} in ${envFile}` +
-      (file.mtime ? ` (file modified ${file.mtime})` : "") +
-      `. Editing the env file did not change the live redirect. This process started at ${PROCESS_STARTED_AT} and will keep the environment value until you restart or reload it. ` +
-      "To use the file, unset WITHINGS_REDIRECT_URI in the MCP client's environment (Cursor: Plugins → Personal Health Data (community) → Configure, then reload the window).";
+  const overridden = [];
+  for (const key of ["WITHINGS_CLIENT_ID", "WITHINGS_CLIENT_SECRET"]) {
+    const fromEnv = unset(env[key]);
+    const fromFile = unset(file.values[key]);
+    if (fromEnv && fromFile && fromEnv !== fromFile) overridden.push(key);
   }
+  const redirectDiffers = Boolean(envRedirect && fileRedirect && envRedirect !== fileRedirect);
+  const bits = [];
+  if (redirectDiffers) {
+    bits.push(`WITHINGS_REDIRECT_URI in the environment is ${envRedirect}, which overrides ${fileRedirect} in ${envFile}` +
+      (file.mtime ? ` (file modified ${file.mtime})` : "") + ".");
+  }
+  // Name the variable only. The client id and the secret must not appear in this sentence.
+  if (overridden.length) bits.push(`${overridden.join(" and ")} in the environment overrides a different value in ${envFile}. Those values are not shown.`);
+  const configStaleWarning = bits.length
+    ? `${bits.join(" ")} Editing the env file did not change what this process is using. This process started at ${PROCESS_STARTED_AT} and will keep the environment value until you restart or reload it. ` +
+      `To use the file, unset ${[...overridden, ...(redirectDiffers ? ["WITHINGS_REDIRECT_URI"] : [])].join(" and ")} in the MCP client's environment (Cursor: Plugins → Personal Health Data (community) → Configure, then reload the window).`
+    : null;
   partial.configStaleWarning = configStaleWarning;
   partial.redirectWarning = redirectWarningText(partial);
   partial.configNote = (file.error ? `${file.error} ` : "") + configNoteText(partial);
@@ -306,8 +333,12 @@ export class Client {
     if (!code) throw new WithingsError("No authorization code found. Paste the code or the whole URL you were redirected to.", 0);
     if (expectedState && state && state !== expectedState) throw new WithingsError("The state in the redirect does not match this authorization request. Run start_authorization again. Do not reuse this code; it is single-use.", 0);
     const c = this.config;
-    // Compare before calling Withings so a wrong callback does not burn the one-time code.
-    if (pastedRedirect && pastedRedirect !== c.redirectUri) throw new WithingsError(pasteMismatchMessage(pastedRedirect, c), 0);
+    // Compare normalised forms so a browser's URL (empty path as "/", lowercased host, default port omitted)
+    // is not refused when Withings would accept it. A configured value that is not a URL skips this guard.
+    // The value sent to Withings stays the configured string, unchanged.
+    const configuredKey = callbackKey(c.redirectUri);
+    const pastedKey = pastedRedirect ? callbackKey(pastedRedirect) : null;
+    if (pastedRedirect && configuredKey && configuredKey !== pastedKey) throw new WithingsError(pasteMismatchMessage(pastedRedirect, c), 0);
     const tok = await this.tokenRequest({ grant_type: "authorization_code", code, redirect_uri: c.redirectUri });
     tok.redirect_uri = c.redirectUri;
     const file = c.tokenFile;

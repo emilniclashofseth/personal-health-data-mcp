@@ -26,7 +26,7 @@ try {
       // Browser on this computer: the listener finishes by itself. Browser elsewhere (headless/remote server): the
       // localhost redirect fails to load there, but its address bar still holds the code, so accept a paste as well.
       console.log(`2) Waiting for Withings to redirect to ${r.redirect_uri} (up to ${r.listen_minutes} min)...`);
-      console.log(`   Browser on another computer? The redirect page will not load there. Copy the full address from the\n   address bar and paste it here within 30 seconds, then press Enter.`);
+      console.log(`   Browser on another computer? That includes a hosted assistant (this plugin on the assistant's computer,\n   your browser on yours). The redirect page will not load. Copy the full address from the address bar and paste it\n   here within 30 seconds, then press Enter.`);
       const rl = process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
       const pasted = rl ? rl.question("   Redirect URL (or wait): ").then((answer) => ({ answer })) : new Promise(() => {});
       const first = await Promise.race([r._result.then((out) => ({ out })), pasted]);
@@ -45,7 +45,7 @@ try {
     }
     process.exit(0);
   } else {
-    console.log("Personal Health Data (community) setup. Compatible with Withings; not made or endorsed by Withings.\nThis is not super straightforward, but if you follow docs/SETUP-WITHINGS.md exactly it should be fine. It is mostly copy-pasting.\nUsage: node server/cli.mjs authorize   one-time browser authorization (re-run to re-authorize)\n       node server/cli.mjs status      show setup status, including the live redirect URI (no secrets)");
+    console.log("Personal Health Data (community) setup. Compatible with Withings; not made or endorsed by Withings.\nThis is not super straightforward, but if you follow docs/SETUP-WITHINGS.md exactly it should be fine. It is mostly copy-pasting. The first time takes about 10–15 minutes.\nUsage: node server/cli.mjs authorize   one-time browser authorization (re-run to re-authorize)\n       node server/cli.mjs status      show setup status, including the live redirect URI (no secrets)");
   }
 } catch (e) {
   console.error(client.redact(e.message)); process.exit(1);

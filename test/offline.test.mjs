@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Client, readConfig, readEnvFile, resolveRange, defaultTokenFile } from "../server/client.mjs";
+import { Client, callbackKey, readConfig, readEnvFile, resolveRange, defaultTokenFile } from "../server/client.mjs";
 import { makeHandler } from "../server/index.mjs";
 import { TOOLS, mergeSessions, decodeGroup, nightSleep, dayActivity } from "../server/tools.mjs";
 import { startAuthorization, stopListener, pendingState } from "../server/auth-flow.mjs";
@@ -298,6 +298,70 @@ test("invalid code and redirect mismatch get different advice; HTTP error pages 
   assert.ok(!http.content[0].text.includes(SECRET));
 });
 
+test("pasted callback guard accepts browser normalization and still rejects a real mismatch", async () => {
+  assert.equal(callbackKey("https://example.com"), "https://example.com/");
+  assert.equal(callbackKey("https://example.com/"), "https://example.com/");
+  assert.equal(callbackKey("https://Example.com/cb"), "https://example.com/cb");
+  assert.equal(callbackKey("https://example.com:443/cb"), "https://example.com/cb");
+  assert.equal(callbackKey("http://example.com:80/cb"), "http://example.com/cb");
+  assert.equal(callbackKey("http://localhost:8765/callback/"), "http://localhost:8765/callback/");
+  assert.notEqual(callbackKey("http://localhost:8765/callback"), callbackKey("http://localhost:8765/callback/"));
+  assert.notEqual(callbackKey("http://localhost:8765/callback"), callbackKey("http://127.0.0.1:8765/callback"));
+  assert.equal(callbackKey("not a url"), null);
+
+  const accept = [
+    ["https://example.com", "https://example.com/?code=abc&state=s"],
+    ["https://example.com/cb", "https://Example.com/cb?code=abc&state=s"],
+    ["https://example.com/cb", "https://example.com:443/cb?code=abc&state=s"],
+    ["http://example.com/cb", "http://example.com:80/cb?code=abc&state=s"],
+    ["https://Example.com/cb", "https://example.com/cb?code=abc&state=s"],
+  ];
+  for (const [redirect, pasted] of accept) {
+    let sent = null;
+    const dir = await mkdtemp(path.join(os.tmpdir(), "wpd-norm-"));
+    const h = makeHandler(new Client({
+      env: { WITHINGS_CLIENT_ID: ID, WITHINGS_CLIENT_SECRET: SECRET, WITHINGS_REDIRECT_URI: redirect, WITHINGS_TOKEN_FILE: path.join(dir, "t.json") },
+      pauseMs: 0, wait: async () => {},
+      fetchImpl: async (u, o) => { sent = Object.fromEntries(new URLSearchParams(o.body)); return json({ status: 0, body: { access_token: hex("a"), refresh_token: hex("n"), expires_in: 10800, scope: "user.info" } }); },
+    }));
+    const r = await call(h, "exchange_code", { redirect_url_or_code: pasted });
+    assert.equal(r.isError, false, `${redirect} vs ${pasted}: ${r.content[0].text}`);
+    assert.equal(sent.redirect_uri, redirect);
+    assert.equal(sent.code, "abc");
+    assert.ok(!r.content[0].text.includes("abc"));
+  }
+
+  const reject = [
+    ["http://localhost:8765/callback", "http://localhost:8765/callback/?code=other-code&state=z"],
+    ["http://localhost:8765/callback", "http://127.0.0.1:8765/callback?code=other-code&state=z"],
+    ["https://example.com/cb", "https://example.com:8443/cb?code=other-code&state=z"],
+  ];
+  for (const [redirect, pasted] of reject) {
+    let n = 0;
+    const h = makeHandler(new Client({
+      env: { WITHINGS_CLIENT_ID: ID, WITHINGS_CLIENT_SECRET: SECRET, WITHINGS_REDIRECT_URI: redirect, WITHINGS_TOKEN_FILE: path.join(os.tmpdir(), "no-such-tokens.json") },
+      pauseMs: 0, wait: async () => {}, fetchImpl: async () => { n++; return json({ status: 0, body: {} }); },
+    }));
+    const r = await call(h, "exchange_code", { redirect_url_or_code: pasted });
+    assert.equal(r.isError, true, redirect);
+    assert.equal(n, 0);
+    assert.match(r.content[0].text, /was not sent/);
+    assert.ok(!r.content[0].text.includes("other-code"));
+  }
+
+  let n = 0; let sent = null;
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wpd-skip-"));
+  const skip = makeHandler(new Client({
+    env: { WITHINGS_CLIENT_ID: ID, WITHINGS_CLIENT_SECRET: SECRET, WITHINGS_REDIRECT_URI: "not a url", WITHINGS_TOKEN_FILE: path.join(dir, "t.json") },
+    pauseMs: 0, wait: async () => {},
+    fetchImpl: async (u, o) => { n++; sent = Object.fromEntries(new URLSearchParams(o.body)); return json({ status: 0, body: { access_token: hex("a"), refresh_token: hex("n"), expires_in: 10800 } }); },
+  }));
+  const skipped = await call(skip, "exchange_code", { redirect_url_or_code: "https://example.com/cb?code=abc&state=s" });
+  assert.equal(skipped.isError, false, skipped.content[0].text);
+  assert.equal(n, 1);
+  assert.equal(sent.redirect_uri, "not a url");
+});
+
 test("a pasted callback that differs is rejected before any request and the code is not echoed", async () => {
   let n = 0;
   const h = makeHandler(new Client({
@@ -377,6 +441,29 @@ test("old token files without a recorded redirect do not raise a mismatch", asyn
   assert.deepEqual(st.missing, []);
 });
 
+test("stale client id or secret names the variable and never the value", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wpd-stale-"));
+  const f = path.join(dir, "withings.env");
+  const fileId = "file-client-id-should-not-leak";
+  const fileSecret = "file-secret-should-not-leak";
+  const envId = "env-client-id-should-not-leak";
+  const envSecret = "env-secret-should-not-leak";
+  await writeFile(f, `WITHINGS_CLIENT_ID=${fileId}\nWITHINGS_CLIENT_SECRET=${fileSecret}\nWITHINGS_REDIRECT_URI=https://example.com/from-file\nWITHINGS_TOKEN_FILE=${dir}/none.json\n`);
+  const env = { WITHINGS_ENV_FILE: f, WITHINGS_CLIENT_ID: envId, WITHINGS_CLIENT_SECRET: envSecret, WITHINGS_REDIRECT_URI: "https://example.com/from-env" };
+  const h = makeHandler(new Client({ env, pauseMs: 0, wait: async () => {}, fetchImpl: async () => json({}) }));
+  const st = (await call(h, "auth_status")).structuredContent;
+  const guide = (await call(h, "setup_guide")).structuredContent;
+  for (const blob of [JSON.stringify(st), JSON.stringify(guide)]) {
+    assert.match(blob, /WITHINGS_CLIENT_ID/);
+    assert.match(blob, /WITHINGS_CLIENT_SECRET/);
+    assert.match(blob, /restart/);
+    assert.ok(!blob.includes(fileId) && !blob.includes(envId) && !blob.includes(fileSecret) && !blob.includes(envSecret), blob);
+  }
+  assert.match(st.config_stale_warning, /https:\/\/example\.com\/from-env/);
+  assert.match(st.config_stale_warning, /https:\/\/example\.com\/from-file/);
+  assert.equal(st.redirect_action, "restart_to_pick_up_config");
+});
+
 test("setup_guide is an ordered walkthrough and never echoes secrets or the client id", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "wpd-guide-"));
   const h = makeHandler(new Client({
@@ -397,6 +484,10 @@ test("setup_guide is an ordered walkthrough and never echoes secrets or the clie
   assert.equal(s.steps[0].done, null);
   assert.match(s.steps[2].instruction, /http:\/\/localhost:8765\/callback/);
   assert.match(s.tone, /copy-pasting/);
+  assert.match(s.tone, /10–15 minutes/);
+  const finish = s.steps.find((x) => x.id === "finish_authorization").instruction;
+  assert.match(finish, /assistant's computer/);
+  assert.match(finish, /paste it back to the assistant right away/);
   assert.match(s.if_this_error.map((e) => e.id).join(","), /redirect_uri_mismatch/);
   const blob = JSON.stringify(s);
   assert.ok(!blob.includes(SECRET) && !blob.includes(ID));

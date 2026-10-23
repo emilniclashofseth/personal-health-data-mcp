@@ -6,7 +6,9 @@
 - The env file is re-read on every auth call. Environment variables still come from process start. Status reports where the redirect came from, when the process started, when config was read, and a warning when the env file and the environment disagree.
 - The token file records the redirect used at authorization (not a secret). Status warns if the live redirect has since changed. Refresh keeps that recorded redirect.
 - `exchange_code` and the CLI distinguish a callback mismatch from an expired or invalid code, and refuse to send a code whose pasted callback does not match the one this process is using.
-- `setup_guide` and `docs/SETUP-WITHINGS.md` walk a non-technical user through setup one step at a time. The default callback is the localhost URL above, so no website is required. The one-time code is not sent to a third party.
+- `setup_guide` and `docs/SETUP-WITHINGS.md` walk a non-technical user through setup one step at a time. The first time takes about 10–15 minutes. The default callback is the localhost URL above, so no website is required. When the plugin runs on an assistant's computer and the browser is on the user's, the localhost page fails to load; they paste the address back. The one-time code is not sent to a third party.
+- The paste check compares normalised callbacks (lowercase scheme and host, default port dropped, empty path as `/`). A trailing slash on a non-root path still counts, and `localhost` is still different from `127.0.0.1`. A configured value that is not a URL does not block the paste.
+- `config_stale_warning` also names `WITHINGS_CLIENT_ID` or `WITHINGS_CLIENT_SECRET` when the environment overrides a different env-file value. It does not print either value.
 
 ## 0.2.0 — 2026-10-23
 

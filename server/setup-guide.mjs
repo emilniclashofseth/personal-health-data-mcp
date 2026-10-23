@@ -2,7 +2,7 @@
 // Step order here is the order an assistant should say out loud. The default callback is DEFAULT_REDIRECT.
 import { DEFAULT_REDIRECT, DASHBOARD, SETUP_HELP } from "./client.mjs";
 
-export const TONE = "This is not super straightforward, but if you follow the steps exactly it should be fine. It is mostly copy-pasting. Do one step, then stop and wait.";
+export const TONE = "This is not super straightforward, but if you follow the steps exactly it should be fine. It is mostly copy-pasting. The first time takes about 10–15 minutes. Do one step, then stop and wait.";
 
 export const GUIDE_PATH = "docs/SETUP-WITHINGS.md";
 
@@ -74,9 +74,10 @@ export function setupSteps(st) {
       title: "Finish on this server within 30 seconds",
       observable: true,
       advance_when: "auth_status shows authorized:true, or exchange_code returns ok:true.",
-      instruction: `If the browser is on the same computer as this server and the callback is ${DEFAULT_REDIRECT} (or another localhost URL this server is listening on), the page should say you are connected. You are done with this step. ` +
-        "If the browser is on another computer (a remote or headless server), that localhost page fails to load. That is expected. Copy the entire address from the address bar — it contains code= and state= — within 30 seconds and pass it to exchange_code on this same server, or paste it at the CLI prompt of the same authorize command. " +
-        "If your callback is an https URL on your own site, the browser lands there; copy that full address the same way, within 30 seconds. Do not send the address to anyone else and do not put it on a third-party site. If more than about 30 seconds pass, or the server was restarted, run start_authorization again. The old code is dead.",
+      instruction: `If your browser is on the same computer as this plugin and the callback is ${DEFAULT_REDIRECT} (or another localhost URL this server is listening on), the page should say you are connected. You are done with this step. ` +
+        "Often they are not on the same computer. A hosted assistant runs this plugin on the assistant's computer, and the user's browser is on their own computer. Withings then opens the localhost page on the user's computer, where nothing is waiting, so the page fails to load. That is expected. Ask them to copy the entire address from the address bar (it contains code= and state=) and paste it back to the assistant right away, within 30 seconds. Pass that paste to exchange_code on this same server. " +
+        "The same paste is what to do when the plugin is on any other remote or headless computer, or when they are at the CLI prompt of the same authorize command. " +
+        "If the callback is an https URL on their own site, the browser lands there; they copy that full address the same way, within 30 seconds. They should not send the address to anyone else or put it on a third-party site. If more than about 30 seconds pass, or the server was restarted, run start_authorization again. The old code is dead.",
     },
     {
       id: "confirm",
@@ -115,7 +116,7 @@ export function setupErrors(st) {
     {
       id: "redirect_page_will_not_load",
       symptom: "After approving, the browser says it cannot connect, or the localhost page never appears.",
-      do_this: `Expected when the browser is not on the same computer as the server. The address bar still has the code. Copy the whole address within 30 seconds and pass it to exchange_code on the same server that printed the authorization link (callback ${uri}). Or, before you approve, forward the port: ssh -L 8765:127.0.0.1:8765 you@server (use the port in your callback).`,
+      do_this: `Expected when the browser is not on the same computer as this plugin. That includes a hosted assistant: the plugin runs on the assistant's computer and the browser is on the user's computer, so the localhost page fails to load. Copy the whole address within 30 seconds and paste it back to the assistant, which passes it to exchange_code on the same server that printed the authorization link (callback ${uri}). Or, before you approve, forward the port: ssh -L 8765:127.0.0.1:8765 you@server (use the port in your callback).`,
     },
     {
       id: "stale_process",
@@ -179,6 +180,6 @@ export function assessSetup(st) {
   return {
     current_step, missing, checks, redirect_action: st.redirect_action ?? null,
     next_instruction, next_step, steps,
-    assistant_note: "Tell the user only one step, then wait. This is not super straightforward, but if they follow the steps exactly it should be fine; it is mostly copy-pasting. If a step's done is null, this server cannot see the Withings website: when the user says that step is done, give them the next step even if another setup_guide call still shows the same current_step. Call setup_guide again after they save credentials and after authorization. Before start_authorization, read redirect_warning to them. Never ask them to paste the client secret into chat. The one-time code in the browser address is not the secret; it goes only to exchange_code on this server.",
+    assistant_note: "Tell the user only one step, then wait. This is not super straightforward, but if they follow the steps exactly it should be fine; it is mostly copy-pasting. The first time takes about 10–15 minutes. If a step's done is null, this server cannot see the Withings website: when the user says that step is done, give them the next step even if another setup_guide call still shows the same current_step. Call setup_guide again after they save credentials and after authorization. Before start_authorization, read redirect_warning to them. Never ask them to paste the client secret into chat. When the plugin runs on the assistant's computer and the browser is on the user's, the localhost page fails to load; that is expected, and they paste the full address back right away. The one-time code in that address is not the secret; it goes only to exchange_code on this server.",
   };
 }
