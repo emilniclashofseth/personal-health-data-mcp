@@ -4,7 +4,8 @@
 //   DayActivity     = { date, steps, distance_km, floors, active_min, active_kcal, total_kcal, hr_avg, ... }
 //   NightSleep      = { date (wake day), start_local, end_local, total_sleep_min, deep/light/rem_min, sleep_score, ... }
 // Values are decoded (value * 10^unit). A missing metric is null, never 0. Every result carries data_source: "Withings".
-import { SCOPES, SETUP_HELP, WithingsError, resolveRange, addDays } from "./client.mjs";
+import { DEFAULT_REDIRECT, SCOPES, WithingsError, resolveRange, addDays } from "./client.mjs";
+import { GUIDE_PATH, TONE, assessSetup, setupErrors } from "./setup-guide.mjs";
 
 const SOURCE = "Withings";
 
@@ -180,15 +181,38 @@ export const TOOLS = [
     async run(c) { const b = await c.call("/v2/user", { action: "getdevice" }); return wrap((b.devices || []).map(device)); },
   },
   {
-    name: "auth_status", title: "Setup status",
-    description: "Shows whether the Withings app credentials are configured (directly or via WITHINGS_ENV_FILE) and whether you have authorized access: token file location, the scopes this plugin requests (user.info, user.metrics, user.activity) and the scopes Withings actually granted (Withings may add user.sleepevents, which is notification-only and unused), minutes left on the current access token. Never shows the secret or tokens.",
+    name: "setup_guide", title: "Setup walkthrough",
+    description: "Step-by-step Withings setup for a non-technical user, plus where this server is right now. Read-only. Returns no secrets. Walk steps in order, one step per turn, using each step's instruction. Steps with done null cannot be checked from here (this server cannot see the Withings website); when the user says that step is done, go to the next step even if another call still shows the same current_step. Call again after they save credentials and after authorization. Before start_authorization, read redirect_warning to the user: the redirect_uri must exactly match a Callback URL in their Withings app. Default callback, used when WITHINGS_REDIRECT_URI is unset: http://localhost:8765/callback. Human version: " + GUIDE_PATH + ".",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async run(c) { const st = await c.status(); return { ...st, next_step: !st.client_configured ? (st.env_file_problem ? `${st.env_file_problem} ${SETUP_HELP}` : SETUP_HELP) : !st.authorized ? "Run start_authorization and approve access in the browser." : null }; },
+    async run(c) {
+      const st = await c.status();
+      const a = assessSetup(st);
+      return {
+        tone: TONE, default_callback: DEFAULT_REDIRECT, callback_in_use: st.redirect_uri, guide_path: GUIDE_PATH,
+        ...st, current_step: a.current_step, missing: a.missing, checks: a.checks,
+        next_instruction: a.next_instruction, next_step: a.next_step, assistant_note: a.assistant_note,
+        steps: a.steps, if_this_error: setupErrors(st),
+      };
+    },
+  },
+  {
+    name: "auth_status", title: "Setup status",
+    description: "Shows whether the Withings app credentials are configured (directly or via WITHINGS_ENV_FILE) and whether you have authorized access. Reports the redirect URI actually in use, whether it was explicitly configured or defaulted (redirect_uri_defaulted), where it came from (redirect_uri_source: environment, env_file, or default), when this process started, and when config was last read. The env file is re-read on every call; environment variables stay as they were when the process started until you restart. config_stale_warning is set when the env file has a different redirect than the environment. redirect_changed_warning is set when the saved token was obtained with a different callback. Also returns the current setup step, what is missing (client_id, client_secret, token), and next_instruction. Never shows the secret or tokens. Full walkthrough: setup_guide.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async run(c) {
+      const st = await c.status();
+      const a = assessSetup(st);
+      return {
+        ...st, setup_step: a.current_step, missing: a.missing, checks: a.checks,
+        next_instruction: a.next_instruction, assistant_note: a.assistant_note, next_step: a.next_step,
+      };
+    },
   },
   {
     name: "start_authorization", title: "Authorize (one time)",
-    description: "One-time setup step. Returns the Withings authorization URL for the user to open in a browser. Requests the read-only scopes " + SCOPES.join(", ") + "; Withings may also add user.sleepevents to the grant (notification-only, unused here), which auth_status lists under extra_granted_scopes. If the callback URL is on localhost, this server listens there for 10 minutes and finishes the setup by itself when the browser runs on the same computer. If the browser is on another computer, or the callback is not localhost, the user copies the full redirect URL from the address bar and passes it to exchange_code on this same server within 30 seconds. Writes only the local token file.",
+    description: "One-time setup step. Returns the Withings authorization URL for the user to open in a browser, and the redirect_uri this process will send. Read redirect_warning to the user BEFORE they open the URL: that redirect must exactly match a Callback URL in their Withings developer app, or Withings shows redirect_uri_mismatch and no code. redirect_uri_defaulted is true when WITHINGS_REDIRECT_URI is unset (the built-in default http://localhost:8765/callback). Requests the read-only scopes " + SCOPES.join(", ") + "; Withings may also add user.sleepevents to the grant (notification-only, unused here), which auth_status lists under extra_granted_scopes. If the callback URL is on localhost, this server listens there for 10 minutes and finishes the setup by itself when the browser runs on the same computer. If the browser is on another computer, or the callback is not localhost, the user copies the full redirect URL from the address bar and passes it to exchange_code on this same server within 30 seconds. Writes only the local token file.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async run(c) {
@@ -199,7 +223,7 @@ export const TOOLS = [
   },
   {
     name: "exchange_code", title: "Finish authorization (non-localhost callback)",
-    description: "Finishes the one-time authorization when the callback URL is not on localhost, or when the browser ran on a different computer than this server (the localhost redirect then fails to load in the browser, but its address still holds the code): pass the full URL from the browser's address bar (or just its code). Must be called on the same server process that ran start_authorization, within 30 seconds (Withings codes expire after 30 s and work once). Saves the tokens to the local token file (chmod 600); never returns them.",
+    description: "Finishes the one-time authorization when the callback URL is not on localhost, or when the browser ran on a different computer than this server (the localhost redirect then fails to load in the browser, but its address still holds the code): pass the full URL from the browser's address bar (or just its code). Must be called on the same server process that ran start_authorization, within 30 seconds (Withings codes expire after 30 s and work once). If the pasted address's callback differs from this server's redirect_uri, the code is not sent (it would be rejected and used up) and the error tells you both URLs. A redirect_uri_mismatch from Withings names the redirect_uri this server sent and what to change. An expired or invalid code tells you to run start_authorization again and paste faster. Saves the tokens to the local token file (chmod 600) and records which redirect_uri was used; never returns tokens or the code.",
     inputSchema: { type: "object", properties: { redirect_url_or_code: { type: "string", description: "The URL you were redirected to (contains ?code=...&state=...), or the code itself." } }, required: ["redirect_url_or_code"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async run(c, a) {

@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { Client, WithingsError } from "./client.mjs";
 import { TOOLS } from "./tools.mjs";
 
-export const SERVER_INFO = { name: "personal-health-data", title: "Personal Health Data (community) · Compatible with Withings", version: "0.2.0" };
+export const SERVER_INFO = { name: "personal-health-data", title: "Personal Health Data (community) · Compatible with Withings", version: "0.3.0" };
 const PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 export function makeHandler(client = new Client()) {
@@ -20,7 +20,7 @@ export function makeHandler(client = new Client()) {
         const v = PROTOCOLS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOLS[0];
         return ok({
           protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO,
-          instructions: "Read-only access to the authorizing user's own Withings data via the Withings Public API. Community project, not affiliated with Withings. Dates are YYYY-MM-DD in the user's local time; nulls mean not measured.",
+          instructions: "Read-only access to the authorizing user's own Withings data via the Withings Public API. Community project, not affiliated with Withings. Dates are YYYY-MM-DD in the user's local time; nulls mean not measured. If setup is incomplete, call setup_guide and walk the user through one step at a time. Never ask them to paste the client secret. Before start_authorization, read redirect_warning to the user: redirect_uri must exactly match a Callback URL in their Withings developer app. When WITHINGS_REDIRECT_URI is unset the callback is http://localhost:8765/callback.",
         });
       }
       case "ping": return ok({});

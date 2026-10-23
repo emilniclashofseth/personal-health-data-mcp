@@ -1,6 +1,6 @@
 {
   "name": "personal-health-data-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Community MCP server + Cursor plugin for your own Withings data via the Withings Public API (read-only). Not made or endorsed by Withings.",
   "type": "module",
   "private": true,

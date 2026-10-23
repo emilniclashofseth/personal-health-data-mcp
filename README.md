@@ -15,6 +15,12 @@ skill that tells the agent when to use the tools. It works with any MCP client t
 (Cursor, Grok Bot, Claude Desktop and others). The entry point is **`server/index.mjs`**; the setup CLI is
 `server/cli.mjs`.
 
+## New here? Start with the walkthrough
+
+Setting this up is not super straightforward, but if you follow the steps exactly it should be fine. It is mostly copy-pasting.
+
+**[docs/SETUP-WITHINGS.md](docs/SETUP-WITHINGS.md)** is the step-by-step for someone who has never used a developer portal. The short version of the callback: if you do not have a website, register exactly `http://localhost:8765/callback` (the plugin's default; it can answer that address on your own computer). An assistant should call `setup_guide` and give you one step at a time. Before anyone opens the Withings link, `auth_status` / `start_authorization` name the redirect the running process will actually send, and whether that value was configured or just the default.
+
 ## Tools
 | Tool | What it returns | Withings endpoint (POST) | Scope |
 |---|---|---|---|
@@ -23,8 +29,9 @@ skill that tells the agent when to use the tools. It works with any MCP client t
 | `get_daily_activity` | steps, distance, floors, activity minutes, calories, HR and HR zones per day | `/v2/measure` `getactivity` | user.activity |
 | `get_sleep_summary` | per night: total sleep, time in bed, stages, efficiency, latency, wake-ups, sleep score, HR, breathing rate, snoring. Empty result = no sleep device in Withings; it then returns a `hint` to check `list_devices` | `/v2/sleep` `getsummary` | user.activity |
 | `list_devices` | linked devices: type, model, battery, firmware, last sync (no serial numbers or ids) | `/v2/user` `getdevice` | user.info |
-| `auth_status` | is it configured (env or `WITHINGS_ENV_FILE`) and authorized, token file path, requested vs granted scopes, minutes left on the access token | (local) | |
-| `start_authorization` / `exchange_code` | one-time authorization (see Setup) | `/v2/oauth2` `requesttoken` | |
+| `setup_guide` | step-by-step setup script plus where this server is right now (no secrets) | (local) | |
+| `auth_status` | configured (env or `WITHINGS_ENV_FILE`) and authorized; the live redirect URI and whether it was defaulted; where that value came from and when; requested vs granted scopes; what is still missing | (local) | |
+| `start_authorization` / `exchange_code` | one-time authorization (see Setup). `start_authorization` repeats the callback check before you open Withings | `/v2/oauth2` `requesttoken` | |
 
 Range tools take `start_date` / `end_date` (`YYYY-MM-DD`, your local dates; up to 366 days per call). Values are decoded
 from Withings' `value × 10^unit` format into the units named in each field. Metrics your device didn't measure are
@@ -49,6 +56,8 @@ In Cursor you can instead install it from the directory: https://cursor.director
 
 ## Setup (about 5 minutes, once)
 
+Follow **[docs/SETUP-WITHINGS.md](docs/SETUP-WITHINGS.md)** if this is your first time. The rest of this section is the same setup, shorter, for reference.
+
 You need a Withings account with your devices synced in the Withings app. Withings' current terms say that sharing data
 with a third-party service may require an active **Withings+** subscription (Terms of Use §6.4.1); check this if
 authorization works but data calls fail.
@@ -58,11 +67,17 @@ authorization works but data calls fail.
    normal Withings account. Withings' guide: https://developer.withings.com/developer-guide/v3/integration-guide/public-health-data-api/developer-account/create-your-accesses-no-medical-cloud
 2. Create an application: **Public API integration** on the **Public Cloud** (free; endpoint `https://wbsapi.withings.net`).
 3. Give it any name and description that is your own, e.g. "My health data". Don't call it "Withings …".
-4. **Callback URL** — pick one:
-   - **Recommended: `http://localhost:8765/callback`.** Withings accepts `http`/`localhost` callbacks for apps in the
-     integration (development) phase, which is limited to 10 users. That's fine because the only user is you. With this
-     callback the plugin finishes the setup by itself: it listens on `127.0.0.1:8765` for up to 10 minutes after you
-     start authorization. Use a different port by registering it and setting `WITHINGS_REDIRECT_URI` to the same value.
+4. **Callback URL** — pick one, and register it exactly. The plugin's default, used whenever `WITHINGS_REDIRECT_URI` is
+   unset, is `http://localhost:8765/callback`. `auth_status` shows the value the running process will send
+   (`redirect_uri`), whether you set it or it was defaulted (`redirect_uri_defaulted`, `redirect_uri_source`), and a
+   warning to compare it with the dashboard before you open Withings. If they differ, Withings shows
+   `redirect_uri_mismatch` and does not give you a code.
+   - **No website of your own: `http://localhost:8765/callback`.** Leave `WITHINGS_REDIRECT_URI` empty. Withings accepts
+     `http`/`localhost` callbacks for apps in the integration (development) phase, which is limited to 10 users. That's
+     fine because the only user is you. With this callback the plugin finishes the setup by itself when the browser is
+     on the same computer: it listens on `127.0.0.1:8765` for up to 10 minutes after you start authorization. Use a
+     different port by registering it and setting `WITHINGS_REDIRECT_URI` to the same value. Do not point the callback
+     at a third-party redirect service; the browser is sent there with a one-time code.
    - **If the dashboard rejects localhost:** register any HTTPS URL you control (e.g. a page on your own website). The
      page doesn't have to do anything. After you approve, your browser lands on `https://your-url?code=…&state=…`. Copy
      that whole address within **30 seconds** (Withings codes are valid for 30 s and work once) and give it to the
@@ -84,7 +99,14 @@ The server reads `WITHINGS_CLIENT_ID`, `WITHINGS_CLIENT_SECRET` and, if you didn
   shell-expanded. Variables set directly in the server's environment win over the file.
 - **Directly as environment variables** in your client's settings for the server.
 
-Then register the server with your MCP client and restart/reload it:
+The env file is re-read on every `auth_status`, `setup_guide`, `start_authorization`, and `exchange_code` call, so a
+callback change in that file shows up on the next call. Values in the process environment (Cursor's Configure fields,
+or variables you exported in the shell) were copied in when the process started. They do not change until a new
+process starts, and they override the file. `auth_status` reports `process_started_at`, `config_read_at`,
+`redirect_uri_source` (`default`, `environment`, or `env_file`), and `config_stale_warning` when the file and the
+environment disagree.
+
+Then register the server with your MCP client and restart/reload it when you set or change environment variables:
 - **Cursor:** install the plugin. When it asks for settings, paste the Client ID into **`WITHINGS_CLIENT_ID`** and the
   Secret into **`WITHINGS_CLIENT_SECRET`** (and the callback URL into `WITHINGS_REDIRECT_URI` if you didn't use the
   default). To change them later: **Plugins → Personal Health Data (community) → Configure**, then reload the window.
@@ -191,20 +213,33 @@ the token file outside any repository you commit.
   Each person who installs the plugin creates their own Withings app, so nobody's data passes through anyone else.
 
 ## Troubleshooting
-- **Redirect URI mismatch.** Symptoms: Withings shows an error instead of the approval page (e.g. about an invalid
-  `redirect_uri`), or `exchange_code`/the CLI says the token request failed and names the `redirect_uri` it used. Fix:
-  the value the server uses (`WITHINGS_REDIRECT_URI`, default `http://localhost:8765/callback`) must equal a Callback
-  URL registered for your app in the developer dashboard **character for character**: scheme (`http` vs `https`),
-  host (`localhost` vs `127.0.0.1`), port, path, and trailing slash. Check what the server uses with `auth_status`
-  (`redirect_uri`), correct either side, restart the server, and run `start_authorization` again (the code from the
-  failed attempt can't be reused).
+The same cases, with the wording to expect, are in [docs/SETUP-WITHINGS.md](docs/SETUP-WITHINGS.md) ("If you get this error, do this").
+- **Redirect URI mismatch.** Withings shows `redirect_uri_mismatch` / "does not match partner callback url" instead of
+  the approval page, or `exchange_code` / the CLI says it rejected the callback and names `redirect_uri=…`. The value
+  this process sends (`redirect_uri` in `auth_status`) must equal a Callback URL in your developer app **character for
+  character**: scheme (`http` vs `https`), host (`localhost` vs `127.0.0.1`), port, path, and trailing slash.
+  `redirect_uri_defaulted: true` means `WITHINGS_REDIRECT_URI` is unset and the server is using
+  `http://localhost:8765/callback` — register that exact URL, or set the variable to the URL you already registered.
+  If `redirect_uri_source` is `environment`, restart or reload so a new process starts. If it is `env_file`, the next
+  auth call re-reads the file; a set environment variable still wins (`config_stale_warning`). Then run
+  `start_authorization` again. The code from the failed attempt can't be reused.
+- **Changed the settings but the old callback is still in use.** Compare `process_started_at` with when you edited.
+  Environment variables are frozen for the life of the process (a Cursor reload that does not actually respawn the
+  server leaves the old value). The env file is not frozen. `config_note` says which one this process used.
+- **Code expired / invalid (status 304, "invalid code").** Codes last about 30 seconds, work once, and must be
+  exchanged by the same server process that started the authorization. `exchange_code` says this separately from a
+  callback mismatch. Run `start_authorization` again and paste the new address immediately. If the pasted address's
+  callback is not the one this server is using, the code is not sent (so it is not used up) and the error names both
+  URLs.
 - **"Not set up yet"** although you set the values: your client probably passed the literal `${WITHINGS_CLIENT_ID}`
   (only Cursor expands it). Use an absolute `WITHINGS_ENV_FILE`. `auth_status` shows `env_file_problem` if the file
   can't be read.
-- **Code expired / state mismatch**: codes last 30 seconds and work once, and must be exchanged by the same server
-  process that started the authorization. Run `start_authorization` again and paste faster, or use the port forward.
+- **State mismatch**: the pasted redirect belongs to a different `start_authorization`. Start again; don't reuse the code.
+- **The localhost page will not load:** the browser is not on the same computer as the server. Copy the full address
+  bar within 30 seconds into `exchange_code`, or forward the port (`ssh -L 8765:127.0.0.1:8765 you@server`).
 - **Port 8765 in use**: free it, or register another localhost port and set `WITHINGS_REDIRECT_URI` to match.
-- **Token rejected after it worked before**: see "Sharing one token file" above; re-authorize.
+- **Token rejected after it worked before**: see "Sharing one token file" above; re-authorize. If you changed the
+  callback since authorizing, `redirect_changed_warning` says so; data calls keep working until you re-authorize.
 - **`get_sleep_summary` returns nothing**: no sleep device is linked in Withings. Check `list_devices`.
 
 ## Limits and caveats
@@ -222,9 +257,9 @@ npm test                     # offline tests: node --test test/*.test.mjs (mocke
 npm run test:live            # a few real read-only calls against your own account (needs env + a token file)
 npm run authorize            # one-time authorization (CLI)
 ```
-No dependencies, no install step (`npm ci` works with the empty lockfile but isn't needed). The code: `server/client.mjs` (OAuth, token file, refresh, retries), `server/auth-flow.mjs` (localhost
-callback listener), `server/tools.mjs` (tools and output shapes), `server/index.mjs` (MCP stdio JSON-RPC),
-`server/cli.mjs` (setup CLI).
+No dependencies, no install step (`npm ci` works with the empty lockfile but isn't needed). The code: `server/client.mjs` (OAuth, token file, refresh, retries, redirect warnings), `server/auth-flow.mjs` (localhost
+callback listener), `server/setup-guide.mjs` (the walkthrough `setup_guide` returns), `server/tools.mjs` (tools and output shapes), `server/index.mjs` (MCP stdio JSON-RPC),
+`server/cli.mjs` (setup CLI). The human setup steps are `docs/SETUP-WITHINGS.md`.
 
 ## License
 MIT. See `LICENSE`. Not affiliated with Withings.

@@ -1,8 +1,8 @@
 {
   "name": "personal-health-data-mcp",
   "displayName": "Personal Health Data (community)",
-  "version": "0.2.0",
-  "description": "Community plugin, not made or endorsed by Withings. Compatible with Withings: read-only MCP tools for your own Withings data (weight and body composition, blood pressure, daily activity, sleep, devices) through the Withings Public API, using your own Withings developer app.",
+  "version": "0.3.0",
+  "description": "Community plugin, not made or endorsed by Withings. Compatible with Withings: read-only MCP tools for your own Withings data (weight and body composition, blood pressure, daily activity, sleep, devices) through the Withings Public API, using your own Withings developer app. Register callback http://localhost:8765/callback (the default) or set WITHINGS_REDIRECT_URI to the exact Callback URL in your app.",
   "author": {
     "name": "Emil Niclas Hofseth",
     "url": "https://github.com/emilniclashofseth"
@@ -37,7 +37,7 @@
       "WITHINGS_REDIRECT_URI": {
         "type": "string",
         "title": "Callback URL (optional)",
-        "description": "Must match a Callback URL registered in your Withings app exactly. Default: http://localhost:8765/callback."
+        "description": "Optional. Must exactly match a Callback URL registered in your Withings developer app. Leave empty to use http://localhost:8765/callback, and register that exact URL. Changing this environment variable requires reloading the window so the server process restarts. Never paste the secret into chat."
       }
     },
     "required": [

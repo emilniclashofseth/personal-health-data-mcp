@@ -2,6 +2,8 @@
 # Launcher for the Withings-compatible community MCP server (stdio).
 # Client id/secret (and optional WITHINGS_REDIRECT_URI / WITHINGS_TOKEN_FILE) come from a mode-600 env file that the
 # server reads itself (WITHINGS_ENV_FILE), so they are never placed in an MCP client config, argv, or a log.
+# The server re-reads that file on every auth call. A WITHINGS_REDIRECT_URI in the process environment overrides the file
+# and stays frozen until this process is replaced. Leave WITHINGS_REDIRECT_URI unset to use http://localhost:8765/callback.
 # Point your MCP client at this script: {"command": "/absolute/path/to/run-health-data.sh", "args": []}
 set -euo pipefail
 ROOT="${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"   # repo root; or set an absolute path here

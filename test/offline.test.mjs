@@ -41,6 +41,10 @@ test("config: unexpanded placeholders count as unset; token file is outside the 
   const c = readConfig({ WITHINGS_CLIENT_ID: "${WITHINGS_CLIENT_ID}", WITHINGS_CLIENT_SECRET: "", HOME: "/home/u", XDG_CONFIG_HOME: "/home/u/.config" });
   assert.equal(c.clientId, null); assert.equal(c.clientSecret, null);
   assert.equal(c.redirectUri, "http://localhost:8765/callback");
+  assert.equal(c.redirectUriSource, "default");
+  const cPh = readConfig({ WITHINGS_REDIRECT_URI: "${WITHINGS_REDIRECT_URI}", WITHINGS_CLIENT_ID: ID, WITHINGS_CLIENT_SECRET: SECRET });
+  assert.equal(cPh.redirectUriSource, "default");
+  assert.match(cPh.redirectWarning, /redirect_uri_mismatch/);
   assert.match(defaultTokenFile({ XDG_CONFIG_HOME: "/x/.config" }), /personal-health-data-mcp[\\/]tokens\.json$/);
 });
 
@@ -70,11 +74,12 @@ test("authorization URL asks only for read scopes", async () => {
 
 test("exchange_code stores tokens with mode 600, without userid, and returns no token", async () => {
   const { h, tokenFile, calls } = await setup();
-  const r = await call(h, "exchange_code", { redirect_url_or_code: "https://example.com/cb?code=abc123&state=zzz" });
+  const r = await call(h, "exchange_code", { redirect_url_or_code: "http://localhost:8765/callback?code=abc123&state=zzz" });
   assert.equal(r.isError, false, r.content[0].text);
   assert.ok(!r.content[0].text.includes(hex("b")) && !r.content[0].text.includes(hex("o")));
   const saved = JSON.parse(await readFile(tokenFile, "utf8"));
   assert.equal(saved.access_token, hex("b")); assert.equal(saved.userid, undefined);
+  assert.equal(saved.redirect_uri, "http://localhost:8765/callback");
   if (process.platform !== "win32") {
     assert.equal((await stat(tokenFile)).mode & 0o777, 0o600);
     assert.equal((await stat(path.dirname(tokenFile))).mode & 0o777, 0o700);
@@ -178,6 +183,8 @@ test("MCP handshake, tools/list and annotations", async () => {
   const { h } = await setup();
   const init = await h({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } } });
   assert.equal(init.result.protocolVersion, "2025-06-18");
+  assert.match(init.result.instructions, /setup_guide/);
+  assert.match(init.result.instructions, /redirect_warning/);
   assert.equal(await h({ jsonrpc: "2.0", method: "notifications/initialized" }), null);
   const list = await h({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   assert.deepEqual(list.result.tools.map((t) => t.name), TOOLS.map((t) => t.name));
@@ -198,10 +205,14 @@ test("WITHINGS_ENV_FILE: values read without shell expansion; explicit env wins;
   await writeFile(f, `# my Withings app\nexport WITHINGS_CLIENT_ID=${ID}\nWITHINGS_CLIENT_SECRET="${SECRET}"\nWITHINGS_REDIRECT_URI='http://localhost:9999/cb'\nWITHINGS_TOKEN_FILE=${dir}/t.json\nPATH=/evil\nOTHER=$HOME\n`, { mode: 0o600 });
   const c = readConfig({ WITHINGS_ENV_FILE: f });
   assert.deepEqual([c.clientId, c.clientSecret, c.redirectUri, c.tokenFile, c.envFileError], [ID, SECRET, "http://localhost:9999/cb", `${dir}/t.json`, null]);
+  assert.equal(c.redirectUriSource, "env_file");
   assert.equal(readEnvFile(f).values.PATH, undefined);
   // Cursor-style unexpanded placeholders count as unset, so the file fills them; a real env value wins.
   const c2 = readConfig({ WITHINGS_ENV_FILE: f, WITHINGS_CLIENT_ID: "${WITHINGS_CLIENT_ID}", WITHINGS_REDIRECT_URI: "http://localhost:8765/callback" });
   assert.deepEqual([c2.clientId, c2.redirectUri], [ID, "http://localhost:8765/callback"]);
+  assert.equal(c2.redirectUriSource, "environment");
+  assert.match(c2.configStaleWarning, /localhost:9999\/cb/);
+  assert.match(c2.configStaleWarning, /restart/);
   // Secret from the file is used for token requests and redacted from errors.
   const calls = [];
   const client = new Client({ env: { WITHINGS_ENV_FILE: f }, pauseMs: 0, wait: async () => {}, fetchImpl: async (u, o) => { calls.push(Object.fromEntries(new URLSearchParams(o.body))); return json({ status: 503, error: `bad ${SECRET}` }); } });
@@ -262,4 +273,177 @@ test("failed code exchange explains the redirect URI it used (mismatch troublesh
   const h = makeHandler(new Client({ env, pauseMs: 0, wait: async () => {}, fetchImpl: async (u, o) => { calls.push(o); return json({ status: 503, error: "Invalid Params: invalid redirect_uri" }); } }));
   const r = await call(h, "exchange_code", { redirect_url_or_code: "abc" });
   assert.equal(r.isError, true); assert.match(r.content[0].text, /redirect_uri=https:\/\/example\.com\/cb/); assert.match(r.content[0].text, /character for character/);
+  assert.match(r.content[0].text, /rejected the callback URL/);
+  assert.ok(!r.content[0].text.includes(SECRET) && !r.content[0].text.includes("abc"));
+});
+
+test("invalid code and redirect mismatch get different advice; HTTP error pages are explained too", async () => {
+  const mk = (body, status = 200) => makeHandler(new Client({
+    env: { WITHINGS_CLIENT_ID: ID, WITHINGS_CLIENT_SECRET: SECRET, WITHINGS_REDIRECT_URI: "https://example.com/cb", WITHINGS_TOKEN_FILE: path.join(os.tmpdir(), "no-such-tokens.json") },
+    pauseMs: 0, wait: async () => {},
+    fetchImpl: async () => new Response(JSON.stringify(body), { status }),
+  }));
+  const badCode = await call(mk({ status: 304, error: "The authorization code is absent or incorrect" }), "exchange_code", { redirect_url_or_code: "abc" });
+  assert.equal(badCode.isError, true);
+  assert.match(badCode.content[0].text, /rejected the authorization code/);
+  assert.match(badCode.content[0].text, /30 seconds/);
+  assert.doesNotMatch(badCode.content[0].text, /rejected the callback URL/);
+  const mismatch = await call(mk({ status: 293, error: "The callback URL is either absent or incorrect" }), "exchange_code", { redirect_url_or_code: "abc" });
+  assert.match(mismatch.content[0].text, /rejected the callback URL/);
+  assert.match(mismatch.content[0].text, /redirect_uri=https:\/\/example\.com\/cb/);
+  assert.match(mismatch.content[0].text, /character for character/);
+  const http = await call(mk({ error: "redirect_uri_mismatch: The redirect URI provided is missing or does not match partner callback url" }, 400), "exchange_code", { redirect_url_or_code: "abc" });
+  assert.match(http.content[0].text, /redirect_uri_mismatch/);
+  assert.match(http.content[0].text, /character for character/);
+  assert.ok(!http.content[0].text.includes(SECRET));
+});
+
+test("a pasted callback that differs is rejected before any request and the code is not echoed", async () => {
+  let n = 0;
+  const h = makeHandler(new Client({
+    env: { WITHINGS_CLIENT_ID: ID, WITHINGS_CLIENT_SECRET: SECRET, WITHINGS_REDIRECT_URI: "http://localhost:8765/callback", WITHINGS_TOKEN_FILE: path.join(os.tmpdir(), "no-such-tokens.json") },
+    pauseMs: 0, wait: async () => {}, fetchImpl: async () => { n++; return json({ status: 0, body: {} }); },
+  }));
+  const r = await call(h, "exchange_code", { redirect_url_or_code: "https://mine.example/cb?code=super-secret-code&state=z" });
+  assert.equal(r.isError, true);
+  assert.equal(n, 0);
+  assert.match(r.content[0].text, /https:\/\/mine\.example\/cb/);
+  assert.match(r.content[0].text, /http:\/\/localhost:8765\/callback/);
+  assert.match(r.content[0].text, /was not sent/);
+  assert.ok(!r.content[0].text.includes("super-secret-code"));
+  const slash = await call(h, "exchange_code", { redirect_url_or_code: "http://localhost:8765/callback/?code=other-code&state=z" });
+  assert.equal(slash.isError, true);
+  assert.match(slash.content[0].text, /callback\//);
+  assert.equal(n, 0);
+});
+
+test("env file redirect is re-read on the next call; a set environment variable overrides it", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wpd-reread-"));
+  const f = path.join(dir, "withings.env");
+  await writeFile(f, `WITHINGS_CLIENT_ID=${ID}\nWITHINGS_CLIENT_SECRET=${SECRET}\nWITHINGS_TOKEN_FILE=${dir}/none.json\n`);
+  const env = { WITHINGS_ENV_FILE: f };
+  const client = new Client({ env, pauseMs: 0, wait: async () => {}, fetchImpl: async () => json({ status: 0, body: {} }) });
+  let st = await client.status();
+  assert.equal(st.redirect_uri_source, "default");
+  assert.equal(st.redirect_uri_defaulted, true);
+  assert.equal(st.config_stale_warning, null);
+  assert.ok(!JSON.stringify(st).includes(SECRET));
+  await writeFile(f, `WITHINGS_CLIENT_ID=${ID}\nWITHINGS_CLIENT_SECRET=${SECRET}\nWITHINGS_TOKEN_FILE=${dir}/none.json\nWITHINGS_REDIRECT_URI=https://example.com/cb\n`);
+  st = await client.status();
+  assert.equal(st.redirect_uri, "https://example.com/cb");
+  assert.equal(st.redirect_uri_source, "env_file");
+  assert.equal(st.redirect_uri_defaulted, false);
+  assert.match(st.config_note, /re-read/);
+  env.WITHINGS_REDIRECT_URI = "http://localhost:8765/callback";
+  st = await client.status();
+  assert.equal(st.redirect_uri, "http://localhost:8765/callback");
+  assert.equal(st.redirect_uri_source, "environment");
+  assert.match(st.config_stale_warning, /https:\/\/example\.com\/cb/);
+  assert.match(st.config_stale_warning, /restart/);
+  assert.match(st.process_started_at, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("saved token records the redirect; a later change is flagged; refresh keeps the original", async () => {
+  const { client, h, env, tokenFile } = await setup({ routes: [[/user#getdevice/, () => json({ status: 0, body: { devices: [] } })]] });
+  const ex = await call(h, "exchange_code", { redirect_url_or_code: "http://localhost:8765/callback?code=abc123&state=z" });
+  assert.equal(ex.isError, false, ex.content[0].text);
+  let saved = JSON.parse(await readFile(tokenFile, "utf8"));
+  assert.equal(saved.redirect_uri, "http://localhost:8765/callback");
+  assert.equal(saved.userid, undefined);
+  env.WITHINGS_REDIRECT_URI = "https://example.com/cb";
+  const st = (await call(h, "auth_status")).structuredContent;
+  assert.equal(st.redirect_changed_since_authorization, true);
+  assert.equal(st.redirect_action, "differs_from_saved_token");
+  assert.equal(st.setup_step, "redirect_attention");
+  assert.match(st.redirect_changed_warning, /https:\/\/example\.com\/cb/);
+  assert.match(st.redirect_changed_warning, /http:\/\/localhost:8765\/callback/);
+  saved.obtained_at = 1;
+  await writeFile(tokenFile, JSON.stringify(saved));
+  client.tokens = null;
+  const listed = await call(h, "list_devices");
+  assert.equal(listed.isError, false, listed.content[0].text);
+  saved = JSON.parse(await readFile(tokenFile, "utf8"));
+  assert.equal(saved.redirect_uri, "http://localhost:8765/callback");
+  assert.ok(!JSON.stringify(st).includes(SECRET));
+});
+
+test("old token files without a recorded redirect do not raise a mismatch", async () => {
+  const { h } = await setup({ tokens: fresh() });
+  const st = (await call(h, "auth_status")).structuredContent;
+  assert.equal(st.token_redirect_uri, null);
+  assert.equal(st.redirect_changed_since_authorization, false);
+  assert.equal(st.redirect_changed_warning, null);
+  assert.equal(st.setup_step, "confirm");
+  assert.deepEqual(st.missing, []);
+});
+
+test("setup_guide is an ordered walkthrough and never echoes secrets or the client id", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wpd-guide-"));
+  const h = makeHandler(new Client({
+    env: { WITHINGS_CLIENT_ID: "${WITHINGS_CLIENT_ID}", WITHINGS_CLIENT_SECRET: "", WITHINGS_REDIRECT_URI: "${WITHINGS_REDIRECT_URI}", WITHINGS_TOKEN_FILE: path.join(dir, "none.json") },
+    fetchImpl: async () => json({}),
+  }));
+  const r = await call(h, "setup_guide");
+  assert.equal(r.isError, false, r.content[0].text);
+  const s = r.structuredContent;
+  assert.equal(s.default_callback, "http://localhost:8765/callback");
+  assert.equal(s.callback_in_use, "http://localhost:8765/callback");
+  assert.equal(s.redirect_uri_defaulted, true);
+  assert.equal(s.guide_path, "docs/SETUP-WITHINGS.md");
+  assert.deepEqual(s.steps.map((x) => x.id), ["withings_account", "create_app", "register_callback", "copy_credentials", "save_credentials_locally", "start_authorization", "finish_authorization", "confirm"]);
+  assert.equal(s.current_step, "withings_account");
+  assert.deepEqual(s.missing, ["client_id", "client_secret", "token"]);
+  assert.equal(s.checks.redirect_uri, "default");
+  assert.equal(s.steps[0].done, null);
+  assert.match(s.steps[2].instruction, /http:\/\/localhost:8765\/callback/);
+  assert.match(s.tone, /copy-pasting/);
+  assert.match(s.if_this_error.map((e) => e.id).join(","), /redirect_uri_mismatch/);
+  const blob = JSON.stringify(s);
+  assert.ok(!blob.includes(SECRET) && !blob.includes(ID));
+});
+
+test("auth_status and start_authorization warn before Withings when the callback was defaulted", async () => {
+  const { h } = await setup();
+  const st = (await call(h, "auth_status")).structuredContent;
+  assert.equal(st.redirect_uri_defaulted, true);
+  assert.equal(st.redirect_uri_source, "default");
+  assert.equal(st.setup_step, "start_authorization");
+  assert.deepEqual(st.missing, ["token"]);
+  assert.equal(st.checks.client_secret, "set");
+  assert.equal(st.redirect_action, "register_this_exact_url");
+  assert.match(st.redirect_warning, /partner callback url/);
+  assert.match(st.next_instruction, /Before anyone opens Withings/);
+  assert.ok(!JSON.stringify(st).includes(SECRET) && !JSON.stringify(st).includes(ID));
+  try {
+    const r = await call(h, "start_authorization");
+    assert.equal(r.isError, false, r.content[0].text);
+    const s = r.structuredContent;
+    assert.equal(s.listening, true);
+    assert.equal(s.redirect_uri_defaulted, true);
+    assert.equal(new URL(s.authorization_url).searchParams.get("redirect_uri"), "http://localhost:8765/callback");
+    assert.match(s.next_step, /Callback check before you open Withings/);
+    assert.match(s.redirect_warning, /character for character/);
+    assert.ok(!JSON.stringify(s).includes(SECRET));
+  } finally { stopListener(); }
+});
+
+test("cli status reports a defaulted redirect and no secrets", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "wpd-cli-"));
+  const f = path.join(dir, "withings.env");
+  await writeFile(f, `WITHINGS_CLIENT_ID=${ID}\nWITHINGS_CLIENT_SECRET=${SECRET}\nWITHINGS_TOKEN_FILE=${dir}/none.json\n`);
+  const { spawn } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const proc = spawn(process.execPath, ["server/cli.mjs", "status"], { cwd: root, env: { PATH: process.env.PATH, HOME: dir, WITHINGS_ENV_FILE: f } });
+  let out = "", err = "";
+  proc.stdout.on("data", (d) => { out += d; });
+  proc.stderr.on("data", (d) => { err += d; });
+  const code = await new Promise((resolve) => proc.on("close", resolve));
+  assert.equal(code, 0, err + out);
+  assert.ok(!out.includes(SECRET) && !err.includes(SECRET));
+  const j = JSON.parse(out);
+  assert.equal(j.redirect_uri_defaulted, true);
+  assert.equal(j.redirect_uri, "http://localhost:8765/callback");
+  assert.equal(j.setup_step, "start_authorization");
+  assert.match(j.next_instruction, /Before anyone opens Withings/);
 });
