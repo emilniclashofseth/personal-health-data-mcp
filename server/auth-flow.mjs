@@ -6,8 +6,9 @@ import { WithingsError } from "./client.mjs";
 let pending = null;   // { state, server, timer }
 export const pendingState = () => pending?.state ?? null;
 
+const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 function page(title, text) {
-  return `<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font:16px system-ui;margin:3em;max-width:40em"><h2>${title}</h2><p>${text}</p></body>`;
+  return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><body style="font:16px system-ui;margin:3em;max-width:40em"><h2>${esc(title)}</h2><p>${esc(text)}</p></body>`;
 }
 
 export function stopListener() {
@@ -16,16 +17,32 @@ export function stopListener() {
   clearTimeout(pending.timer); pending.server?.close(); pending = null;
 }
 
+function redirectFields(st) {
+  return {
+    redirect_uri: st.redirect_uri, redirect_uri_source: st.redirect_uri_source, redirect_uri_defaulted: st.redirect_uri_defaulted,
+    redirect_warning: st.redirect_warning, redirect_action: st.redirect_action,
+    config_note: st.config_note, config_stale_warning: st.config_stale_warning,
+    config_read_at: st.config_read_at, process_started_at: st.process_started_at,
+    token_redirect_uri: st.token_redirect_uri, redirect_changed_since_authorization: st.redirect_changed_since_authorization,
+    redirect_changed_warning: st.redirect_changed_warning,
+  };
+}
+
 export async function startAuthorization(client, { timeoutMs = 10 * 60e3, onDone } = {}) {
   stopListener();
   const auth = client.authorizationUrl();
+  const st = await client.status();
+  const fields = redirectFields(st);
+  const guard = `Callback check before you open Withings: ${st.redirect_warning}` +
+    (st.config_stale_warning ? ` ${st.config_stale_warning}` : "") +
+    (st.redirect_changed_warning ? ` ${st.redirect_changed_warning}` : "");
   const cb = new URL(auth.redirect_uri);
   const local = cb.protocol === "http:" && ["localhost", "127.0.0.1"].includes(cb.hostname);
   pending = { state: auth.state, server: null, timer: null };
   if (!local) {
     return {
-      authorization_url: auth.url, redirect_uri: auth.redirect_uri, scopes: auth.scopes, listening: false,
-      next_step: "Open the URL, approve, then within 30 seconds pass the full URL you land on to exchange_code on this same server (or run `node server/cli.mjs authorize`, which asks for it). The redirect URL must match a Callback URL registered in your Withings app exactly.",
+      authorization_url: auth.url, ...fields, scopes: auth.scopes, listening: false,
+      next_step: `${guard} Open the URL, approve, then within 30 seconds paste the full address from the browser back to the assistant (or to \`node server/cli.mjs authorize\`, which asks for it) so it can call exchange_code on this same server. Do not send that address anywhere else. The redirect URL must match a Callback URL registered in your Withings app exactly, or Withings shows redirect_uri_mismatch and no code.`,
     };
   }
   const port = Number(cb.port) || 80;
@@ -45,15 +62,15 @@ export async function startAuthorization(client, { timeoutMs = 10 * 60e3, onDone
         onDone?.(e);
       }
     });
-    server.on("error", (e) => { onDone?.(new WithingsError(`Could not listen on ${cb.host}: ${e.code}. Free the port or change WITHINGS_REDIRECT_URI.`, 0)); resolve({ ok: false }); });
+    server.on("error", (e) => { onDone?.(new WithingsError(`Could not listen on ${cb.host}: ${e.code}. Free the port, or set WITHINGS_REDIRECT_URI to another localhost URL, register that exact URL as a Callback URL in your Withings app, and restart the server if you set it in the environment.`, 0)); resolve({ ok: false }); });
     server.listen(port, "127.0.0.1");
     pending.server = server;
     pending.timer = setTimeout(() => { stopListener(); resolve({ ok: false, timeout: true }); }, timeoutMs);
     pending.timer.unref?.();
   });
   return {
-    authorization_url: auth.url, redirect_uri: auth.redirect_uri, scopes: auth.scopes, listening: true, listen_minutes: Math.round(timeoutMs / 60e3),
-    next_step: `Open the URL in a browser and approve. If the browser runs on the same computer as this server, the page you land on confirms the setup; then call auth_status. If the browser is on another computer (remote or headless server), the redirect to ${auth.redirect_uri} will fail to load there: that is expected. Copy the full address from the browser's address bar (it contains ?code=...&state=...) and within 30 seconds pass it to exchange_code on this same server (the pending request lives in this process). Alternatively forward the port first (ssh -L ${port}:127.0.0.1:${port} <server>) so the redirect reaches this listener.`,
+    authorization_url: auth.url, ...fields, scopes: auth.scopes, listening: true, listen_minutes: Math.round(timeoutMs / 60e3),
+    next_step: `${guard} Open the URL in a browser and approve. If the browser runs on the same computer as this server, the page you land on confirms the setup; then call auth_status. If the browser is on another computer, the redirect to ${auth.redirect_uri} will fail to load there: that is expected. This is the usual case for a hosted assistant (this plugin runs on the assistant's computer and the browser is on the user's computer), and also for a remote or headless server. Copy the full address from the browser's address bar (it contains ?code=...&state=...) and paste it back to the assistant within 30 seconds so it can call exchange_code on this same server (the pending request lives in this process). Do not send that address anywhere else. Alternatively forward the port first (ssh -L ${port}:127.0.0.1:${port} <server>) so the redirect reaches this listener.`,
     _result: result,
   };
 }

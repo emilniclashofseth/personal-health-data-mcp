@@ -2,7 +2,8 @@
 
 **Live listing:** https://cursor.directory/plugins/personal-health-data-community
 
-The text below is the listing copy as submitted (the live description matched it on 2026-10-23). The directory builds
+The text below is the listing copy to submit. The live description matched the previous text on 2026-10-23; this file
+was updated the same day for the callback default and the setup guide, and has not been resubmitted. The directory builds
 the install config from this repo's `mcp.json`. Changes to this file do not update the live listing; resubmit after the
 owner approves.
 
@@ -11,7 +12,7 @@ owner approves.
 **Tagline:** Compatible with Withings
 
 **Description:**
-Community plugin, not made or endorsed by Withings. Read-only access to your own Withings data (weight, body composition, blood pressure, activity, sleep) via your own developer app.
+Community plugin, not made or endorsed by Withings. Read-only access to your own Withings data (weight, body composition, blood pressure, activity, sleep) via your own developer app. Setup is copy-paste: the callback must match the Withings app exactly; the default is http://localhost:8765/callback (docs/SETUP-WITHINGS.md).
 
 **Repository:** https://github.com/emilniclashofseth/personal-health-data-mcp
 
