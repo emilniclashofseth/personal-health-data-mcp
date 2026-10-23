@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-10-23
 
+- Fix: the token-file lock is now an exclusive `flock` on `<token file>.lock` (held by a small `flock`, `perl` or `python3` helper process), compatible with Python's `fcntl.flock`. The old lock used create-exclusive on the same path and deleted it afterwards (and after 60 s as "stale"), so it neither waited for nor was respected by a flock holder sharing the file, and a concurrent refresh could invalidate the other side's rotating refresh token. The token is still re-read under the lock; saves are now fsynced before the atomic rename. The lock file is kept, never deleted; the helper gets only PATH in its environment, and a helper killed by a signal no longer hangs the refresh. Decision record: docs/decisions/0001-token-file-lock.md.
 - Docs: Disclaimer section (general wellness only, not medical advice; the author receives no data; unofficial; provided as is). LICENSE trademark line now names Withings (it wrongly named Garmin). Skill and server instructions tell the agent not to diagnose and to refer concerning readings to a professional.
 
 ## 0.3.0 — 2026-10-23

@@ -538,3 +538,52 @@ test("cli status reports a defaulted redirect and no secrets", async () => {
   assert.equal(j.setup_step, "start_authorization");
   assert.match(j.next_instruction, /Before anyone opens Withings/);
 });
+
+test("token lock: an exclusive flock on <token file>.lock serialises refreshers across processes (Python-compatible)", { skip: process.platform === "win32" }, async () => {
+  const { spawn, spawnSync } = await import("node:child_process");
+  if (spawnSync("python3", ["-c", "import fcntl"]).status !== 0) return;   // the reference side of the lock
+  const { existsSync } = await import("node:fs");
+  const old = { ...fresh(), obtained_at: Math.floor(Date.now() / 1000) - 4 * 3600 };
+  // 1) Two separate clients (separate in-memory state, like two processes) refresh at once: one refresh, both get it.
+  const a = await setup({ tokens: old });
+  const slow = async (url, opts) => { await new Promise((r) => setTimeout(r, 150)); return json({ status: 0, body: { access_token: hex("e"), refresh_token: hex("f"), expires_in: 10800 } }); };
+  let refreshes = 0;
+  const mk = () => new Client({ env: a.env, fetchImpl: (u, o) => { refreshes++; return slow(u, o); }, pauseMs: 0, wait: async () => {} });
+  const [t1, t2] = await Promise.all([mk().accessToken(), mk().accessToken()]);
+  assert.equal(refreshes, 1); assert.equal(t1, hex("e")); assert.equal(t2, hex("e"));
+  assert.ok(existsSync(a.tokenFile + ".lock"), "the lock file is persistent, never unlinked");
+  assert.equal((await stat(a.tokenFile + ".lock")).mode & 0o777, 0o600);
+  // 2) A Python flock holder (like Health Desk's pull.py) rotates the token; Node waits, re-reads, does not refresh.
+  const b = await setup({ tokens: old });
+  const py = spawn("python3", ["-c", [
+    "import fcntl,json,os,sys,time", "f=sys.argv[1]", "l=open(f+'.lock','a'); fcntl.flock(l,fcntl.LOCK_EX)", "print('held',flush=True)",
+    "time.sleep(0.4)", "t=json.load(open(f)); t.update(access_token='9'*40, refresh_token='8'*40, obtained_at=int(time.time()))",
+    "open(f+'.tmp','w').write(json.dumps(t)); os.replace(f+'.tmp', f)", "fcntl.flock(l,fcntl.LOCK_UN)"].join("\n"), b.tokenFile]);
+  await new Promise((r) => py.stdout.once("data", r));
+  const t0 = Date.now();
+  assert.equal(await b.client.accessToken(), hex("9"));
+  assert.ok(Date.now() - t0 >= 300, "Node waited for the Python holder");
+  assert.equal(b.calls.length, 0, "no second refresh: the rotated token was re-read under the lock");
+  // 3) While Node holds the lock, a Python LOCK_NB attempt is refused.
+  const c = await setup({ tokens: old });
+  let probe;
+  const cl = new Client({ env: c.env, pauseMs: 0, wait: async () => {}, fetchImpl: async (u, o) => {
+    probe = spawnSync("python3", ["-c", "import fcntl,sys\ntry:\n fcntl.flock(open(sys.argv[1],'a'),fcntl.LOCK_EX|fcntl.LOCK_NB); print('free')\nexcept OSError: print('busy')", c.tokenFile + ".lock"]).stdout.toString().trim();
+    return slow(u, o);
+  } });
+  await cl.accessToken();
+  assert.equal(probe, "busy");
+});
+
+test("token lock: a helper killed by a signal while holding the lock does not hang the refresh", { skip: process.platform === "win32" }, async () => {
+  const { spawnSync } = await import("node:child_process");
+  if (spawnSync("pkill", ["-V"]).status !== 0) return;
+  const a = await setup({ tokens: { ...fresh(), obtained_at: Math.floor(Date.now() / 1000) - 4 * 3600 } });
+  const cl = new Client({ env: a.env, pauseMs: 0, wait: async () => {}, fetchImpl: async () => {
+    spawnSync("pkill", ["-9", "-f", a.tokenFile + ".lock"]);   // the helper (flock, perl or python3) dies mid-hold
+    await new Promise((r) => setTimeout(r, 100));
+    return json({ status: 0, body: { access_token: hex("e"), refresh_token: hex("f"), expires_in: 10800 } });
+  } });
+  const settled = await Promise.race([cl.accessToken(), new Promise((r) => setTimeout(() => r("hang"), 3000))]);
+  assert.equal(settled, hex("e"));
+});
