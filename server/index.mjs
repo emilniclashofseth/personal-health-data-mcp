@@ -20,7 +20,7 @@ export function makeHandler(client = new Client()) {
         const v = PROTOCOLS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOLS[0];
         return ok({
           protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO,
-          instructions: "Read-only access to the authorizing user's own Withings data via the Withings Public API. Community project, not affiliated with Withings. Dates are YYYY-MM-DD in the user's local time; nulls mean not measured. If setup is incomplete, call setup_guide and walk the user through one step at a time. Never ask them to paste the client secret. Before start_authorization, read redirect_warning to the user: redirect_uri must exactly match a Callback URL in their Withings developer app. When WITHINGS_REDIRECT_URI is unset the callback is http://localhost:8765/callback.",
+          instructions: "Read-only access to the authorizing user's own Withings data via the Withings Public API. Unofficial community project, not affiliated with Withings. General wellness information only, not medical advice: do not diagnose; refer concerning values or symptoms to a health professional. Dates are YYYY-MM-DD in the user's local time; nulls mean not measured. If setup is incomplete, call setup_guide and walk the user through one step at a time. Never ask them to paste the client secret. Before start_authorization, read redirect_warning to the user: redirect_uri must exactly match a Callback URL in their Withings developer app. When WITHINGS_REDIRECT_URI is unset the callback is http://localhost:8765/callback.",
         });
       }
       case "ping": return ok({});

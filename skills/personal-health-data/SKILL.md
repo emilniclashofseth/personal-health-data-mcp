@@ -1,6 +1,6 @@
 ---
 name: personal-health-data
-description: Use when the user asks about their own Withings data, such as weight, body fat, muscle, water, bone or visceral fat from a Withings scale, blood pressure, daily steps and activity, sleep from a Withings sleep mat or watch, or which Withings devices are linked; or when they need to set up or re-authorize Withings access. Calls the read-only tools of the personal-health-data MCP server (community plugin, not made by Withings).
+description: Use when the user asks about their own Withings data, such as weight, body fat, muscle, water, bone or visceral fat from a Withings scale, blood pressure, daily steps and activity, sleep from a Withings sleep mat or watch, or which Withings devices are linked; or when they need to set up or re-authorize Withings access. Calls the read-only tools of the personal-health-data MCP server (unofficial community plugin, not affiliated with Withings).
 ---
 
 # Personal Health Data (community) · Compatible with Withings
@@ -26,6 +26,7 @@ Data shapes the tools return (all carry `data_source: "Withings"`; units are in 
 ## Rules
 - Dates are `YYYY-MM-DD` in the user's local time. Ranges up to 366 days per call. Fetch the smallest range that answers the question.
 - One body row is one step on the scale. Several readings on the same day are separate rows; for a daily trend use the first reading of each day (morning) unless the user says otherwise.
+- General wellness information only, not medical advice. Report what the device recorded; don't diagnose, label readings as a condition, or suggest treatment or medication. When you interpret health values or trends (blood pressure, heart rate, body composition, vascular or metabolic age, sleep), add a short note that this is not medical advice. If readings look concerning (e.g. high or low blood pressure) or the user mentions symptoms, suggest they talk to a doctor or other qualified health professional (for an emergency, local emergency services).
 - Never invent, estimate or fill values. `null` means the device did not measure it; an empty list means no data in the range. Say which.
 - `source: "manual"` rows were typed in by hand; `ambiguous` means Withings was not sure whose weigh-in it was. Mention this when it matters.
 - Body composition from a scale is an estimate; describe trends over weeks, not day-to-day changes.
