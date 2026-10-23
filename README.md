@@ -192,7 +192,8 @@ the token file outside any repository you commit.
   only safe when every process uses the **same file on the same filesystem** and the same lock: an exclusive
   `flock` on the sidecar file `<token file>.lock` (for example `tokens.json.lock`), re-reading the token file after
   taking the lock and saving by atomic rename. This plugin does that from v0.3.1 (through the `flock`, `perl` or
-  `python3` command; on Windows it only serialises within one process). Your own script can join in, e.g. Python:
+  `python3` command; on Windows it only serialises within one process; on Linux, if none of the three is on PATH, the
+  server writes one warning line to stderr and likewise only serialises within its own process). Your own script can join in, e.g. Python:
   `fcntl.flock(open(path + ".lock", "a"), fcntl.LOCK_EX)`. Never delete the lock file. Don't share the token file
   with tools that lock differently, copy it between machines, or put it on a synced/network folder
   where the lock doesn't work: one side will refresh, the other will keep an outdated refresh token, and you'll have
