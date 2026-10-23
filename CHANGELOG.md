@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- On Linux, when no lock helper (`flock`, `perl` or `python3`) can take the token-file lock, the server now writes one warning line to stderr (once per process) instead of silently falling back to an in-process-only lock.
+
 ## 0.3.1 — 2026-10-23
 
 - Fix: the token-file lock is now an exclusive `flock` on `<token file>.lock` (held by a small `flock`, `perl` or `python3` helper process), compatible with Python's `fcntl.flock`. The old lock used create-exclusive on the same path and deleted it afterwards (and after 60 s as "stale"), so it neither waited for nor was respected by a flock holder sharing the file, and a concurrent refresh could invalidate the other side's rotating refresh token. The token is still re-read under the lock; saves are now fsynced before the atomic rename. The lock file is kept, never deleted; the helper gets only PATH in its environment, and a helper killed by a signal no longer hangs the refresh. Decision record: docs/decisions/0001-token-file-lock.md.

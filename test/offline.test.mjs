@@ -587,3 +587,29 @@ test("token lock: a helper killed by a signal while holding the lock does not ha
   const settled = await Promise.race([cl.accessToken(), new Promise((r) => setTimeout(() => r("hang"), 3000))]);
   assert.equal(settled, hex("e"));
 });
+
+test("token lock: on Linux with no lock helper on PATH, one warning line goes to stderr (none when a helper exists)", { skip: process.platform !== "linux" }, async () => {
+  const { spawnSync } = await import("node:child_process");
+  const old = { ...fresh(), obtained_at: Math.floor(Date.now() / 1000) - 4 * 3600 };
+  const client = new URL("../server/client.mjs", import.meta.url).href;
+  // Two refreshes in one child process: the warning is printed once, and never contains a token.
+  const script = `import { Client } from ${JSON.stringify(client)};
+    const tok = (c) => ({ status: 0, body: { access_token: c.repeat(40), refresh_token: c.repeat(39) + "0", expires_in: 1 } });
+    let n = 0; const env = JSON.parse(process.argv[1]);
+    const cl = new Client({ env, pauseMs: 0, wait: async () => {}, fetchImpl: async () => new Response(JSON.stringify(tok("ef"[n++]))) });
+    await cl.accessToken(); cl.tokens.obtained_at = 0; await cl.accessToken();
+    if (n !== 2) process.exit(9);`;
+  const run = async (PATH) => {
+    const a = await setup({ tokens: old });
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", script, JSON.stringify(a.env)], { env: { PATH }, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stderr;
+  };
+  const emptyBin = await mkdtemp(path.join(os.tmpdir(), "wpd-nobin-"));
+  const warned = await run(emptyBin);
+  assert.equal(warned.split("\n").filter(Boolean).length, 1, warned);
+  assert.match(warned, /warning: no working lock helper \(flock, perl or python3\).*tokens\.json\.lock is not locked across processes/);
+  assert.doesNotMatch(warned, /[0-9a-f]{40}/);
+  const helpers = ["flock", "perl", "python3"].some((c) => spawnSync(c, ["--version"]).status === 0);
+  if (helpers) assert.equal(await run(process.env.PATH), "", "no warning when a helper takes the lock");
+});

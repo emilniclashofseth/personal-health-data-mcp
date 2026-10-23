@@ -267,6 +267,7 @@ function flockVia([cmd, args], lock) {
   });
 }
 
+let warnedNoLock = false;
 async function withLock(file, fn) {
   const lock = `${file}.lock`;
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -278,6 +279,10 @@ async function withLock(file, fn) {
     }
   }
   // No flock helper (e.g. Windows): this process still serialises its own refreshes (Client.pending).
+  if (!release && process.platform === "linux" && !warnedNoLock) {
+    warnedNoLock = true;   // once per process, one line, no token values (stdout is the MCP channel, stderr is the log)
+    process.stderr.write(`[personal-health-data] warning: no working lock helper (flock, perl or python3) on PATH, so ${lock} is not locked across processes; this process still serialises its own refreshes. Install util-linux (flock), perl or python3 if another process shares this token file.\n`);
+  }
   try { return await fn(); } finally { if (release) await release(); }
 }
 
